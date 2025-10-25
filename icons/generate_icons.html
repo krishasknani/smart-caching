@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Extension Icons</title>
+</head>
+<body>
+    <h2>Generate Extension Icons</h2>
+    <p>This page will help you generate the required PNG icons from the SVG.</p>
+    
+    <div>
+        <h3>Instructions:</h3>
+        <ol>
+            <li>Open the SVG file (icon.svg) in a browser or image editor</li>
+            <li>Export/save as PNG with these dimensions:</li>
+            <ul>
+                <li>icon16.png - 16x16 pixels</li>
+                <li>icon48.png - 48x48 pixels</li>
+                <li>icon128.png - 128x128 pixels</li>
+            </ul>
+            <li>Save them in the icons/ directory</li>
+        </ol>
+    </div>
+    
+    <div>
+        <h3>Alternative: Use this canvas to generate icons</h3>
+        <canvas id="iconCanvas" width="128" height="128" style="border: 1px solid #ccc;"></canvas>
+        <br><br>
+        <button onclick="generateIcon(16)">Generate 16x16</button>
+        <button onclick="generateIcon(48)">Generate 48x48</button>
+        <button onclick="generateIcon(128)">Generate 128x128</button>
+    </div>
+
+    <script>
+        function generateIcon(size) {
+            const canvas = document.getElementById('iconCanvas');
+            const ctx = canvas.getContext('2d');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw icon
+            ctx.fillStyle = '#4285f4';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw document
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.fillRect(20, 20, 88, 60);
+            
+            // Draw text lines
+            ctx.fillStyle = '#4285f4';
+            ctx.fillRect(30, 30, 68, 8);
+            ctx.fillRect(30, 45, 50, 6);
+            ctx.fillRect(30, 55, 60, 6);
+            ctx.fillRect(30, 65, 40, 6);
+            
+            // Draw checkmark
+            ctx.fillStyle = 'white';
+            ctx.beginPath();
+            ctx.arc(90, 90, 15, 0, 2 * Math.PI);
+            ctx.fill();
+            
+            ctx.strokeStyle = '#4285f4';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(85, 90);
+            ctx.lineTo(90, 95);
+            ctx.lineTo(95, 85);
+            ctx.stroke();
+            
+            // Download
+            const link = document.createElement('a');
+            link.download = `icon${size}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+        
+        // Generate the 128x128 version on load
+        window.onload = function() {
+            generateIcon(128);
+        };
+    </script>
+</body>
+</html>
