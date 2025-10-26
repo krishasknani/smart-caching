@@ -493,16 +493,52 @@ document.addEventListener("DOMContentLoaded", function () {
         return;
       }
 
+      // Deduplicate pages - keep most recent Playwright version if available
+      const deduplicatedPages = {};
+      cachedPages.forEach((page) => {
+        const existingPage = deduplicatedPages[page.url];
+        if (!existingPage) {
+          // First occurrence of this URL
+          deduplicatedPages[page.url] = page;
+        } else {
+          // Duplicate found - keep the better version
+          if (
+            page.method === "playwright" &&
+            existingPage.method !== "playwright"
+          ) {
+            // Replace simple cache with Playwright cache
+            deduplicatedPages[page.url] = page;
+          } else if (
+            page.method === existingPage.method &&
+            page.timestamp > existingPage.timestamp
+          ) {
+            // Same method - keep newer one
+            deduplicatedPages[page.url] = page;
+          }
+        }
+      });
+
+      const uniquePages = Object.values(deduplicatedPages);
+
       // Clear the list first
       cachedPagesList.innerHTML = "";
 
       // Create each cached page element
-      cachedPages.forEach((page, index) => {
+      uniquePages.forEach((page, index) => {
         const pageElement = document.createElement("div");
         pageElement.className = "cached-page";
+
+        // Add method indicator
+        const methodBadge =
+          page.method === "playwright" && page.cacheHash
+            ? `<span style="background:#4CAF50;color:white;padding:2px 5px;border-radius:3px;font-size:10px;margin-left:5px;">Adv</span>`
+            : `<span style="background:#FF9800;color:white;padding:2px 5px;border-radius:3px;font-size:10px;margin-left:5px;">Basic</span>`;
+
         pageElement.innerHTML = `
           <div class="page-info">
-            <div class="page-title">${escapeHtml(page.title)}</div>
+            <div class="page-title">${escapeHtml(
+              page.title
+            )}${methodBadge}</div>
             <div class="page-url">${escapeHtml(page.url)}</div>
           </div>
           <button class="view-button" data-url="${escapeHtml(
@@ -517,7 +553,16 @@ document.addEventListener("DOMContentLoaded", function () {
         const viewButton = pageElement.querySelector(".view-button");
         const deleteButton = pageElement.querySelector(".delete-button");
 
-        viewButton.addEventListener("click", () => viewCachedPage(page.url));
+        viewButton.addEventListener("click", () => {
+          console.log("Opening cached page:", {
+            url: page.url,
+            method: page.method,
+            cacheHash: page.cacheHash,
+            hasContent: !!page.content,
+            contentLength: page.content ? page.content.length : 0,
+          });
+          viewCachedPage(page.url);
+        });
         deleteButton.addEventListener("click", () =>
           deleteCachedPage(page.url)
         );

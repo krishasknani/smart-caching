@@ -1163,6 +1163,19 @@ async function cachePage(url, options = {}) {
 
     console.log(`  → Rewrote inline scripts for dynamic module loading`);
 
+    // Add base tag to ensure relative paths resolve correctly
+    // This is crucial when the page is loaded from http://localhost:3000/cached/{hash}/
+    if (!rewrittenHtml.includes("<base")) {
+      const baseHref = isLinkedPage ? `../` : `./`;
+      rewrittenHtml = rewrittenHtml.replace(
+        /<head([^>]*)>/i,
+        `<head$1><base href="${baseHref}">`
+      );
+      console.log(
+        `  → Added base href="${baseHref}" for proper path resolution`
+      );
+    }
+
     // Add offline indicator banner and fallback interaction script
     const offlineBanner = `
         <div style="position: fixed; top: 0; left: 0; right: 0; background: #2196F3; color: white; 
