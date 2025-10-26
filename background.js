@@ -138,13 +138,19 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Create Claude prompt for URL clustering
 function createClaudePrompt(data) {
-	// Extract URLs from history and tabs
-	const historyUrls = data.browser_history.map(item => item.url).slice(0, 100); // Limit to first 100 for prompt length
-	const tabUrls = data.current_tabs.map(tab => tab.url);
+	// Extract URLs from history and tabs, but limit and clean them
+	const historyUrls = data.browser_history
+		.map(item => item.url)
+		.filter(url => url && url.length < 200) // Filter out very long URLs
+		.slice(0, 50); // Limit to first 50 for prompt length
+	
+	const tabUrls = data.current_tabs
+		.map(tab => tab.url)
+		.filter(url => url && url.length < 200); // Filter out very long URLs
 	
 	return `Analyze the following browser history and current tabs. Group the URLs into relevant categories/topics based on their content and purpose.
 
-BROWSER HISTORY URLs (${data.total_history_items} total, showing first 100):
+BROWSER HISTORY URLs (${data.total_history_items} total, showing first 50):
 ${historyUrls.join('\n')}
 
 CURRENT TABS URLs (${data.total_open_tabs} total):
@@ -167,7 +173,7 @@ Focus on creating meaningful categories that reflect the user's interests and br
 - User behavior patterns
 - Frequency of visits
 
-Return only the JSON array, no additional text.`;
+IMPORTANT: Return ONLY valid JSON. Do not include any markdown formatting, code blocks, or additional text.`;
 }
 
 // Call Claude API to analyze data
@@ -243,12 +249,22 @@ async function handleClaudeAnalysis(data) {
 				cleanResponse = cleanResponse.replace(/\s*```$/, '');
 			}
 			
+			// Additional cleaning for common JSON issues
+			cleanResponse = cleanResponse.trim();
+			
+			// Try to find the JSON array if it's embedded in other text
+			const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
+			if (jsonMatch) {
+				cleanResponse = jsonMatch[0];
+			}
+			
 			console.log("Cleaned response:", cleanResponse);
 			categories = JSON.parse(cleanResponse);
 			console.log("Successfully parsed categories:", categories);
 		} catch (parseError) {
 			console.error("Error parsing Claude response:", parseError);
 			console.error("Raw response that failed to parse:", claudeResponse);
+			console.error("Parse error details:", parseError.message);
 			throw new Error("Failed to parse Claude response. Please try again.");
 		}
 
