@@ -1,6 +1,7 @@
 document.addEventListener("DOMContentLoaded", function () {
 	const cacheButton = document.getElementById("cacheButton");
 	const analyzeButton = document.getElementById("analyzeButton");
+	const smartCacheButton = document.getElementById("smartCacheButton");
 	const cachedPagesList = document.getElementById("cachedPagesList");
 	const categoriesList = document.getElementById("categoriesList");
 
@@ -23,15 +24,22 @@ document.addEventListener("DOMContentLoaded", function () {
 		analyzeBrowsingPatterns();
 	});
 
+	// Smart cache button click handler
+	if (smartCacheButton) {
+		smartCacheButton.addEventListener("click", function () {
+			runSmartCachingFromCategories();
+		});
+	}
+
 	// Load configuration
 	async function loadConfig() {
 		try {
-			const response = await fetch(chrome.runtime.getURL('config.js'));
+			const response = await fetch(chrome.runtime.getURL("config.js"));
 			const configText = await response.text();
-			
+
 			// Extract config values using regex (CSP-safe)
 			CONFIG = extractConfigFromText(configText);
-			
+
 			console.log("Configuration loaded successfully in popup");
 			return true;
 		} catch (error) {
@@ -44,47 +52,142 @@ document.addEventListener("DOMContentLoaded", function () {
 	function extractConfigFromText(configText) {
 		try {
 			const config = {};
-			
+
 			// Extract API key
 			const apiKeyMatch = configText.match(/CLAUDE_API_KEY:\s*"([^"]+)"/);
 			if (apiKeyMatch) {
 				config.CLAUDE_API_KEY = apiKeyMatch[1];
 			}
-			
+
 			// Extract API URL
 			const apiUrlMatch = configText.match(/CLAUDE_API_URL:\s*"([^"]+)"/);
 			if (apiUrlMatch) {
 				config.CLAUDE_API_URL = apiUrlMatch[1];
 			}
-			
+
 			// Extract model
 			const modelMatch = configText.match(/CLAUDE_MODEL:\s*"([^"]+)"/);
 			if (modelMatch) {
 				config.CLAUDE_MODEL = modelMatch[1];
 			}
-			
+
 			// Extract cache duration
 			const cacheMatch = configText.match(/CACHE_DURATION_HOURS:\s*(\d+)/);
 			if (cacheMatch) {
 				config.CACHE_DURATION_HOURS = parseInt(cacheMatch[1]);
 			}
-			
+
 			// Extract max history items
 			const historyMatch = configText.match(/MAX_HISTORY_ITEMS:\s*(\d+)/);
 			if (historyMatch) {
 				config.MAX_HISTORY_ITEMS = parseInt(historyMatch[1]);
 			}
-			
+
 			// Extract max tabs items
 			const tabsMatch = configText.match(/MAX_TABS_ITEMS:\s*(\d+)/);
 			if (tabsMatch) {
 				config.MAX_TABS_ITEMS = parseInt(tabsMatch[1]);
 			}
-			
+
+			// Extract Brave API key
+			const braveKeyMatch = configText.match(/BRAVE_API_KEY:\s*"([^"]+)"/);
+			if (braveKeyMatch) {
+				config.BRAVE_API_KEY = braveKeyMatch[1];
+			}
+
+			// Optional: Brave results per query
+			const braveCountMatch = configText.match(
+				/BRAVE_RESULTS_PER_QUERY:\s*(\d+)/
+			);
+			if (braveCountMatch) {
+				config.BRAVE_RESULTS_PER_QUERY = parseInt(braveCountMatch[1]);
+			}
+
 			return config;
 		} catch (error) {
 			console.error("Error extracting config from text:", error);
 			return null;
+		}
+	}
+
+	// Generate search queries from categories
+	function generateQueriesFromCategories(categories, maxQueries = 10) {
+		const queries = [];
+		for (const cat of categories || []) {
+			const name = (cat.category_name || "").trim();
+			const kws = Array.isArray(cat.keywords) ? cat.keywords.slice(0, 3) : [];
+			if (!name && kws.length === 0) continue;
+			const q1 = [name, ...kws].filter(Boolean).join(" ").trim();
+			if (q1) queries.push(q1);
+			if (kws.length >= 2) queries.push(kws.join(" "));
+			if (queries.length >= maxQueries) break;
+		}
+		return [...new Set(queries.map((q) => q.replace(/\s+/g, " ").trim()))]
+			.filter(Boolean)
+			.slice(0, maxQueries);
+	}
+
+	async function runSmartCachingFromCategories() {
+		try {
+			if (!smartCacheButton) return;
+			smartCacheButton.disabled = true;
+			smartCacheButton.textContent = "Caching from categories…";
+
+			// Ensure config loaded
+			if (!CONFIG) await loadConfig();
+			const apiKey = (CONFIG?.BRAVE_API_KEY || "").trim();
+			if (!apiKey) {
+				alert("Missing Brave API key. Please set BRAVE_API_KEY in config.js.");
+				return;
+			}
+
+			// Get categories from storage; if missing, run analysis first
+			let { claudeCategories } = await chrome.storage.local.get([
+				"claudeCategories",
+			]);
+			if (!Array.isArray(claudeCategories) || claudeCategories.length === 0) {
+				await analyzeBrowsingPatterns();
+				({ claudeCategories } = await chrome.storage.local.get([
+					"claudeCategories",
+				]));
+			}
+			if (!Array.isArray(claudeCategories) || claudeCategories.length === 0) {
+				alert(
+					"No categories available to generate queries. Try again after analysis."
+				);
+				return;
+			}
+
+			const queries = generateQueriesFromCategories(claudeCategories, 10);
+			if (queries.length === 0) {
+				alert("No queries could be generated from categories.");
+				return;
+			}
+
+			const resultsPerQuery = CONFIG?.BRAVE_RESULTS_PER_QUERY || 5;
+			const response = await chrome.runtime.sendMessage({
+				action: "runSmartCaching",
+				apiKey,
+				queries,
+				resultsPerQuery,
+			});
+
+			if (response?.ok) {
+				await loadCachedPages();
+				alert(
+					`Smart caching complete. Cached ${response.scraped} pages from ${response.totalCandidates} candidates.`
+				);
+			} else {
+				throw new Error(response?.error || "Unknown error");
+			}
+		} catch (err) {
+			console.error("Smart caching error:", err);
+			alert(`Smart caching failed: ${String(err?.message || err)}`);
+		} finally {
+			if (smartCacheButton) {
+				smartCacheButton.disabled = false;
+				smartCacheButton.textContent = "🔎 Smart Cache from Categories";
+			}
 		}
 	}
 
@@ -305,29 +408,28 @@ document.addEventListener("DOMContentLoaded", function () {
 		return div.innerHTML;
 	}
 
-
 	// ===== SMART CACHING ALGORITHM FUNCTIONS =====
 
 	// Fetch ALL browser history (not just 10 items)
 	async function fetchAllBrowserHistory() {
 		try {
 			console.log("Fetching all browser history...");
-			
+
 			// Get all history items (Chrome limits to 100,000 by default)
 			const historyItems = await chrome.history.search({
 				text: "",
 				maxResults: 100000, // Get as many as possible
-				startTime: 0 // From the beginning of time
+				startTime: 0, // From the beginning of time
 			});
 
 			// Filter out restricted URLs and clean up the data
 			const validHistory = historyItems
-				.filter(item => item.url && !isRestrictedUrl(item.url))
-				.map(item => ({
+				.filter((item) => item.url && !isRestrictedUrl(item.url))
+				.map((item) => ({
 					url: item.url,
 					title: item.title || "Untitled",
 					visitCount: item.visitCount || 1,
-					lastVisitTime: item.lastVisitTime || 0
+					lastVisitTime: item.lastVisitTime || 0,
 				}));
 
 			console.log(`Fetched ${validHistory.length} history items`);
@@ -342,19 +444,19 @@ document.addEventListener("DOMContentLoaded", function () {
 	async function fetchAllOpenTabs() {
 		try {
 			console.log("Fetching all open tabs...");
-			
+
 			// Get all tabs across all windows
 			const tabs = await chrome.tabs.query({});
 
 			// Filter out restricted URLs and clean up the data
 			const validTabs = tabs
-				.filter(tab => tab.url && !isRestrictedUrl(tab.url))
-				.map(tab => ({
+				.filter((tab) => tab.url && !isRestrictedUrl(tab.url))
+				.map((tab) => ({
 					url: tab.url,
 					title: tab.title || "Untitled",
 					active: tab.active,
 					windowId: tab.windowId,
-					index: tab.index
+					index: tab.index,
 				}));
 
 			console.log(`Fetched ${validTabs.length} open tabs`);
@@ -369,10 +471,10 @@ document.addEventListener("DOMContentLoaded", function () {
 	async function prepareDataForClaude() {
 		try {
 			console.log("Preparing data for Claude analysis...");
-			
+
 			const [historyData, tabsData] = await Promise.all([
 				fetchAllBrowserHistory(),
-				fetchAllOpenTabs()
+				fetchAllOpenTabs(),
 			]);
 
 			const dataForClaude = {
@@ -380,12 +482,12 @@ document.addEventListener("DOMContentLoaded", function () {
 				current_tabs: tabsData,
 				timestamp: Date.now(),
 				total_history_items: historyData.length,
-				total_open_tabs: tabsData.length
+				total_open_tabs: tabsData.length,
 			};
 
 			console.log("Data prepared for Claude:", {
 				historyItems: historyData.length,
-				openTabs: tabsData.length
+				openTabs: tabsData.length,
 			});
 
 			return dataForClaude;
@@ -401,7 +503,8 @@ document.addEventListener("DOMContentLoaded", function () {
 			// Show loading state
 			analyzeButton.disabled = true;
 			analyzeButton.textContent = "🧠 Analyzing...";
-			categoriesList.innerHTML = '<div class="loading-state">Analyzing your browsing patterns with Claude AI...</div>';
+			categoriesList.innerHTML =
+				'<div class="loading-state">Analyzing your browsing patterns with Claude AI...</div>';
 
 			// Prepare data
 			const data = await prepareDataForClaude();
@@ -412,7 +515,7 @@ document.addEventListener("DOMContentLoaded", function () {
 			// Send to background script for Claude analysis
 			const response = await chrome.runtime.sendMessage({
 				action: "analyzeWithClaude",
-				data: data
+				data: data,
 			});
 
 			if (response.success) {
@@ -437,42 +540,54 @@ document.addEventListener("DOMContentLoaded", function () {
 	function displayCategories(categories) {
 		try {
 			if (!categories || categories.length === 0) {
-				categoriesList.innerHTML = '<div class="empty-state">No categories found</div>';
+				categoriesList.innerHTML =
+					'<div class="empty-state">No categories found</div>';
 				return;
 			}
 
 			// Clear the list first
-			categoriesList.innerHTML = '';
+			categoriesList.innerHTML = "";
 
 			// Create each category element
 			categories.forEach((category) => {
 				const categoryElement = document.createElement("div");
 				categoryElement.className = "category-item";
-				
+
 				// Create keywords HTML
-				const keywordsHtml = category.keywords && category.keywords.length > 0
-					? `<div class="category-keywords">
-							${category.keywords.map(keyword => 
-								`<span class="keyword-tag">${escapeHtml(keyword)}</span>`
-							).join('')}
+				const keywordsHtml =
+					category.keywords && category.keywords.length > 0
+						? `<div class="category-keywords">
+							${category.keywords
+								.map(
+									(keyword) =>
+										`<span class="keyword-tag">${escapeHtml(keyword)}</span>`
+								)
+								.join("")}
 					   </div>`
-					: '';
+						: "";
 
 				// Create URLs HTML (show first 3 URLs)
 				const urlsToShow = category.urls ? category.urls.slice(0, 3) : [];
-				const urlsHtml = urlsToShow.length > 0
-					? `<div class="category-urls">
-							URLs: ${urlsToShow.map(url => escapeHtml(url)).join(', ')}
-							${category.urls.length > 3 ? ` (+${category.urls.length - 3} more)` : ''}
+				const urlsHtml =
+					urlsToShow.length > 0
+						? `<div class="category-urls">
+							URLs: ${urlsToShow.map((url) => escapeHtml(url)).join(", ")}
+							${category.urls.length > 3 ? ` (+${category.urls.length - 3} more)` : ""}
 					   </div>`
-					: '';
+						: "";
 
 				categoryElement.innerHTML = `
 					<div class="category-header">
-						<div class="category-name">${escapeHtml(category.category_name || 'Unnamed Category')}</div>
-						<div class="category-confidence">${Math.round((category.confidence || 0) * 100)}%</div>
+						<div class="category-name">${escapeHtml(
+							category.category_name || "Unnamed Category"
+						)}</div>
+						<div class="category-confidence">${Math.round(
+							(category.confidence || 0) * 100
+						)}%</div>
 					</div>
-					<div class="category-description">${escapeHtml(category.description || 'No description available')}</div>
+					<div class="category-description">${escapeHtml(
+						category.description || "No description available"
+					)}</div>
 					${keywordsHtml}
 					${urlsHtml}
 				`;
@@ -481,7 +596,8 @@ document.addEventListener("DOMContentLoaded", function () {
 			});
 		} catch (error) {
 			console.error("Error displaying categories:", error);
-			categoriesList.innerHTML = '<div class="empty-state">Error displaying categories</div>';
+			categoriesList.innerHTML =
+				'<div class="empty-state">Error displaying categories</div>';
 		}
 	}
 
@@ -496,18 +612,27 @@ document.addEventListener("DOMContentLoaded", function () {
 				}
 			}
 
-			const result = await chrome.storage.local.get(['claudeCategories', 'claudeAnalysisTimestamp']);
-			
+			const result = await chrome.storage.local.get([
+				"claudeCategories",
+				"claudeAnalysisTimestamp",
+			]);
+
 			if (result.claudeCategories && result.claudeAnalysisTimestamp) {
 				// Check if analysis is less than configured hours old
-				const hoursSinceAnalysis = (Date.now() - result.claudeAnalysisTimestamp) / (1000 * 60 * 60);
+				const hoursSinceAnalysis =
+					(Date.now() - result.claudeAnalysisTimestamp) / (1000 * 60 * 60);
 				const cacheDurationHours = CONFIG ? CONFIG.CACHE_DURATION_HOURS : 24; // Use config or default
-				
+
 				if (hoursSinceAnalysis < cacheDurationHours) {
 					displayCategories(result.claudeCategories);
-					console.log("Loaded cached categories from", Math.round(hoursSinceAnalysis), "hours ago");
+					console.log(
+						"Loaded cached categories from",
+						Math.round(hoursSinceAnalysis),
+						"hours ago"
+					);
 				} else {
-					categoriesList.innerHTML = '<div class="empty-state">Previous analysis is outdated. Click "Analyze Browsing Patterns" for fresh results.</div>';
+					categoriesList.innerHTML =
+						'<div class="empty-state">Previous analysis is outdated. Click "Analyze Browsing Patterns" for fresh results.</div>';
 				}
 			}
 		} catch (error) {

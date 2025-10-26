@@ -3,7 +3,20 @@
 	"name": "Smart Caching Extension",
 	"version": "1.0.0",
 	"description": "Cache web pages for offline viewing",
-	"permissions": ["storage", "tabs", "activeTab", "scripting", "history"],
+	"permissions": [
+		"storage",
+		"tabs",
+		"activeTab",
+		"scripting",
+		"history",
+		"offscreen"
+	],
+	"host_permissions": [
+		"https://api.search.brave.com/*",
+		"https://*/",
+		"http://*/"
+	],
+
 	"action": {
 		"default_popup": "popup.html",
 		"default_title": "Smart Caching",
