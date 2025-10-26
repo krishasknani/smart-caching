@@ -14,6 +14,7 @@ A Chrome extension that allows users to manually cache web pages for offline vie
 ### For Development
 
 1. **Load the Extension in Chrome**:
+
    - Open Chrome and go to `chrome://extensions/`
    - Enable "Developer mode" (toggle in top right)
    - Click "Load unpacked"
@@ -51,12 +52,14 @@ Smart Caching/
 ## Usage
 
 1. **Cache a Page**:
+
    - Navigate to any webpage you want to cache
    - Click the extension icon
    - Click "Cache This Page"
    - The page will be saved and available offline
 
 2. **View Cached Pages**:
+
    - Click the extension icon
    - Scroll down to see your cached pages
    - Click "View" to open a cached page in a new tab
@@ -69,16 +72,19 @@ Smart Caching/
 ## Technical Details
 
 ### Permissions Used
+
 - `storage`: To save and retrieve cached pages
 - `tabs`: To get information about the current tab
 - `activeTab`: To interact with the current page
 
 ### Storage
+
 - Uses Chrome's `chrome.storage.local` API
 - Stores page data including URL, title, content, and timestamp
 - Data persists between browser sessions
 
 ### Content Processing
+
 - Removes all `<script>` tags for security
 - Removes event handler attributes (`onclick`, `onload`, etc.)
 - Adds a visual indicator that content is cached
@@ -87,12 +93,14 @@ Smart Caching/
 ## Development
 
 ### Making Changes
+
 1. Edit the relevant files
 2. Go to `chrome://extensions/`
 3. Click the refresh icon on your extension
 4. Test your changes
 
 ### Debugging
+
 - Use Chrome DevTools to debug popup and content scripts
 - Check the console for any errors
 - Use `chrome://extensions/` to see extension errors
@@ -111,16 +119,19 @@ This MVP provides the foundation for more advanced features:
 ## Troubleshooting
 
 ### Extension Not Loading
+
 - Make sure all files are in the correct directory
 - Check that `manifest.json` is valid JSON
 - Ensure all referenced files exist
 
 ### Caching Not Working
+
 - Check browser console for errors
 - Make sure the content script is injected (check `chrome://extensions/`)
 - Verify storage permissions are granted
 
 ### Pages Not Displaying
+
 - Some pages may have CORS restrictions
 - Complex JavaScript-heavy pages may not work perfectly offline
 - Try caching simpler, static pages first
