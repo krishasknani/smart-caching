@@ -799,23 +799,62 @@ async function runSmartCaching(token, zone, queries, resultsPerQuery = 5) {
 		const existingSet = new Set(existing.map((p) => p.url));
 		const toScrape = candidates.filter((u) => !existingSet.has(u));
 
-		// Scrape and cache each page
+		// Decide caching strategy: prefer Playwright if available, else fallback per-URL
+		const usePlaywright =
+			!!CONFIG?.PLAYWRIGHT_ENABLED && (await checkPlaywrightServer());
+
 		const results = [];
 		for (const url of toScrape) {
 			try {
-				const { content, title } = await scrapePage(url);
-				if (!content) throw new Error("Empty content");
-				const pageData = {
-					url,
-					title: title || url,
-					content,
-					timestamp: Date.now(),
-					favicon: "",
-				};
-				await saveCachedPage(pageData);
-				results.push({ url, status: "cached" });
+				if (usePlaywright) {
+					// Try advanced caching first
+					const res = await cacheWithPlaywright(url, 0);
+					results.push({
+						url,
+						status: "cached",
+						method: "playwright",
+						cacheHash: res?.cacheHash,
+					});
+				} else {
+					// Fallback to simple offscreen scraping
+					const { content, title } = await scrapePage(url);
+					if (!content) throw new Error("Empty content");
+					const pageData = {
+						url,
+						title: title || url,
+						content,
+						timestamp: Date.now(),
+						favicon: "",
+					};
+					await saveCachedPage(pageData);
+					results.push({ url, status: "cached", method: "simple" });
+				}
 			} catch (err) {
-				console.warn("Failed to cache", url, err);
+				// If Playwright fails for a URL, try simple scraping as a per-URL fallback
+				if (usePlaywright) {
+					try {
+						const { content, title } = await scrapePage(url);
+						if (!content) throw new Error("Empty content");
+						const pageData = {
+							url,
+							title: title || url,
+							content,
+							timestamp: Date.now(),
+							favicon: "",
+						};
+						await saveCachedPage(pageData);
+						results.push({ url, status: "cached", method: "simple" });
+						continue;
+					} catch (fallbackErr) {
+						console.warn(
+							"Playwright and simple caching both failed",
+							url,
+							fallbackErr
+						);
+					}
+				} else {
+					console.warn("Failed to cache", url, err);
+				}
 				results.push({
 					url,
 					status: "error",
@@ -828,6 +867,7 @@ async function runSmartCaching(token, zone, queries, resultsPerQuery = 5) {
 			ok: true,
 			totalCandidates: candidates.length,
 			scraped: results.filter((r) => r.status === "cached").length,
+			usedPlaywright: usePlaywright === true,
 			results,
 		};
 	} catch (err) {
