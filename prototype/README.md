@@ -125,12 +125,12 @@ To cache pages requiring login:
 
 ```javascript
 fetch("/api/cache", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    url: "https://mail.google.com",
-    cookies: [{ name: "session", value: "abc123", domain: ".google.com" }],
-  }),
+	method: "POST",
+	headers: { "Content-Type": "application/json" },
+	body: JSON.stringify({
+		url: "https://mail.google.com",
+		cookies: [{ name: "session", value: "abc123", domain: ".google.com" }],
+	}),
 });
 ```
 
@@ -192,9 +192,9 @@ Cache a website with all assets.
 
 ```json
 {
-  "url": "https://example.com",
-  "maxDepth": 2,
-  "cookies": [] // optional - authentication cookies
+	"url": "https://example.com",
+	"maxDepth": 2,
+	"cookies": [] // optional - authentication cookies
 }
 ```
 
@@ -202,13 +202,13 @@ Cache a website with all assets.
 
 ```json
 {
-  "success": true,
-  "cacheHash": "abc123...",
-  "url": "https://example.com",
-  "stats": {
-    "pages": 5,
-    "assets": 42
-  }
+	"success": true,
+	"cacheHash": "abc123...",
+	"url": "https://example.com",
+	"stats": {
+		"pages": 5,
+		"assets": 42
+	}
 }
 ```
 

@@ -16,6 +16,33 @@
       margin-bottom: 20px;
     }
     
+    .server-status {
+      display: flex;
+      align-items: center;
+      padding: 8px 12px;
+      background-color: #f5f5f5;
+      border-radius: 4px;
+      margin-bottom: 12px;
+      font-size: 12px;
+    }
+
+    .status-indicator {
+      font-size: 16px;
+      margin-right: 8px;
+    }
+
+    .status-indicator.online {
+      color: #34a853;
+    }
+
+    .status-indicator.offline {
+      color: #ea4335;
+    }
+
+    #statusText {
+      color: #666;
+    }
+    
     .cache-button {
       width: 100%;
       padding: 12px;
@@ -275,6 +302,11 @@
     <body>
         <div class="header">
             <h2>Smart Caching</h2>
+        </div>
+
+        <div class="server-status" id="serverStatus" style="display: none;">
+            <span class="status-indicator" id="statusIndicator">●</span>
+            <span id="statusText">Checking server...</span>
         </div>
 
         <button id="cacheButton" class="cache-button">

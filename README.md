@@ -105,6 +105,53 @@ Smart Caching/
 - Check the console for any errors
 - Use `chrome://extensions/` to see extension errors
 
+## Advanced Caching (Optional)
+
+For better caching of JavaScript-heavy websites, you can optionally run a local Playwright server:
+
+### Setup
+
+1. **Navigate to the prototype folder:**
+
+   ```bash
+   cd prototype
+   npm install
+   ```
+
+2. **Start the server:**
+
+   ```bash
+   npm start
+   ```
+
+3. **Enable in extension:**
+   - Edit `config.js` and set `PLAYWRIGHT_ENABLED: true`
+   - Reload the extension
+
+### Benefits
+
+- ✅ Full JavaScript rendering
+- ✅ Complete asset downloading (images, fonts, etc.)
+- ✅ Better support for SPA frameworks (React, Vue, etc.)
+- ✅ Captures lazy-loaded content
+
+### Fallback
+
+The extension automatically falls back to simple caching if:
+
+- The server is not running
+- `PLAYWRIGHT_ENABLED` is `false`
+- The server request times out
+
+### Status Indicator
+
+When Playwright server is enabled in `config.js`, the extension popup will show:
+
+- 🟢 **"Advanced caching available"** - Server is running
+- 🔴 **"Using simple caching"** - Server is offline (uses fallback)
+
+For detailed setup instructions, see [PLAYWRIGHT_SETUP.md](PLAYWRIGHT_SETUP.md).
+
 ## Future Enhancements
 
 This MVP provides the foundation for more advanced features:

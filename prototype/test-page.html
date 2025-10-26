@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Dynamic Website Caching - Test Page</title>
-    <style>
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Dynamic Website Caching - Test Page</title>
+        <style>
       * {
         margin: 0;
         padding: 0;
@@ -234,90 +234,92 @@
         }
       }
     </style>
-  </head>
-  <body>
-    <div class="container">
-      <h1>🚀 Dynamic Website Caching</h1>
-      <p class="subtitle">
-        Cache JavaScript-rendered websites for offline viewing
-      </p>
+    </head>
+    <body>
+        <div class="container">
+            <h1>🚀 Dynamic Website Caching</h1>
+            <p class="subtitle">
+                Cache JavaScript-rendered websites for offline viewing
+            </p>
 
-      <div class="input-group">
-        <label for="url">Website URL</label>
-        <input
-          type="text"
-          id="url"
-          placeholder="https://example.com"
-          value="https://example.com"
-        />
-      </div>
+            <div class="input-group">
+                <label for="url">Website URL</label>
+                <input
+                    type="text"
+                    id="url"
+                    placeholder="https://example.com"
+                    value="https://example.com" />
+            </div>
 
-      <div class="advanced-options">
-        <h4>⚙️ Advanced Options</h4>
-        <div class="input-group">
-          <label for="maxDepth">Max Link Depth (0-5)</label>
-          <input
-            type="number"
-            id="maxDepth"
-            min="0"
-            max="5"
-            value="0"
-            placeholder="0"
-          />
-          <small
-            style="
+            <div class="advanced-options">
+                <h4>⚙️ Advanced Options</h4>
+                <div class="input-group">
+                    <label for="maxDepth">Max Link Depth (0-5)</label>
+                    <input
+                        type="number"
+                        id="maxDepth"
+                        min="0"
+                        max="5"
+                        value="0"
+                        placeholder="0" />
+                    <small
+                        style="
               color: #666;
               font-size: 12px;
               margin-top: 4px;
               display: block;
-            "
-          >
-            How many levels of linked pages to cache (0 = current page only)
-          </small>
+            ">
+                        How many levels of linked pages to cache (0 = current
+                        page only)
+                    </small>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button class="btn-primary" id="cacheBtn" onclick="cachePage()">
+                    📦 Cache This Site
+                </button>
+                <button
+                    class="btn-secondary"
+                    id="viewBtn"
+                    onclick="viewCached()"
+                    disabled>
+                    👁️ View Cached
+                </button>
+                <button class="btn-secondary" id="checkBtn"
+                    onclick="checkCache()">
+                    🔍 Check Cache
+                </button>
+            </div>
+
+            <div id="status" class="status-box"></div>
+
+            <div class="instructions">
+                <h3>📋 How to Use</h3>
+                <ol>
+                    <li>
+                        Enter a website URL (e.g.,
+                        <code>https://news.ycombinator.com</code>)
+                    </li>
+                    <li>
+                        Click <strong>"Cache This Site"</strong> to download and
+                        save it
+                    </li>
+                    <li>
+                        Wait for the caching process to complete (may take 10-60
+                        seconds)
+                    </li>
+                    <li>
+                        Click <strong>"View Cached"</strong> to open the offline
+                        version
+                    </li>
+                    <li>Turn off your WiFi and try viewing again - it still
+                        works!</li>
+                </ol>
+            </div>
         </div>
-      </div>
 
-      <div class="button-group">
-        <button class="btn-primary" id="cacheBtn" onclick="cachePage()">
-          📦 Cache This Site
-        </button>
-        <button
-          class="btn-secondary"
-          id="viewBtn"
-          onclick="viewCached()"
-          disabled
-        >
-          👁️ View Cached
-        </button>
-        <button class="btn-secondary" id="checkBtn" onclick="checkCache()">
-          🔍 Check Cache
-        </button>
-      </div>
-
-      <div id="status" class="status-box"></div>
-
-      <div class="instructions">
-        <h3>📋 How to Use</h3>
-        <ol>
-          <li>
-            Enter a website URL (e.g.,
-            <code>https://news.ycombinator.com</code>)
-          </li>
-          <li>
-            Click <strong>"Cache This Site"</strong> to download and save it
-          </li>
-          <li>
-            Wait for the caching process to complete (may take 10-60 seconds)
-          </li>
-          <li>
-            Click <strong>"View Cached"</strong> to open the offline version
-          </li>
-          <li>Turn off your WiFi and try viewing again - it still works!</li>
-        </ol>
-      </div>
-    </div>
-
-    <script>
+        <script>
       let currentCacheHash = null;
 
       // Show status message
@@ -498,5 +500,5 @@
         console.log("🚀 Test page loaded");
       });
     </script>
-  </body>
+    </body>
 </html>

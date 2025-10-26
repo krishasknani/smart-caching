@@ -12,6 +12,12 @@ const CONFIG = {
 	// Optional: how many results to fetch per query
 	SERP_RESULTS_PER_QUERY: 5,
 
+	// Playwright Server Configuration (Optional)
+	// Set PLAYWRIGHT_ENABLED to true and run the server for advanced caching
+	PLAYWRIGHT_SERVER_URL: "http://localhost:3000",
+	PLAYWRIGHT_ENABLED: false,
+	PLAYWRIGHT_TIMEOUT: 60000,
+
 	// API Settings
 	CLAUDE_API_URL: "https://api.anthropic.com/v1/messages",
 	CLAUDE_MODEL: "claude-3-5-sonnet-20241022",

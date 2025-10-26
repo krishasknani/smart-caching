@@ -8,13 +8,15 @@ document.addEventListener("DOMContentLoaded", function () {
 
 	// Load configuration
 	let CONFIG = null;
-	loadConfig();
+	loadConfig().then(() => {
+		checkServerStatus(); // Check server status after config loads
+	});
 
 	// Get current tab info and load sections
 	loadCurrentTab();
 	loadCachedPages();
 	loadCachedCategories();
-	
+
 	// Update button state based on first-time analysis
 	updateSmartCacheButton();
 
@@ -42,7 +44,7 @@ document.addEventListener("DOMContentLoaded", function () {
 		autoCacheToggle.addEventListener("change", function () {
 			toggleAutoCaching(this.checked);
 		});
-		
+
 		// Load current auto-caching preference
 		loadAutoCachingPreference();
 	}
@@ -136,12 +138,48 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
+	// Check Playwright server status
+	async function checkServerStatus() {
+		const serverStatus = document.getElementById("serverStatus");
+		const statusIndicator = document.getElementById("statusIndicator");
+		const statusText = document.getElementById("statusText");
+
+		if (!CONFIG?.PLAYWRIGHT_ENABLED) {
+			serverStatus.style.display = "none";
+			return;
+		}
+
+		serverStatus.style.display = "flex";
+		statusText.textContent = "Checking server...";
+		statusIndicator.className = "status-indicator";
+
+		try {
+			const response = await fetch(
+				`${CONFIG.PLAYWRIGHT_SERVER_URL}/api/health`,
+				{
+					method: "GET",
+					signal: AbortSignal.timeout(3000),
+				}
+			);
+
+			if (response.ok) {
+				statusIndicator.className = "status-indicator online";
+				statusText.textContent = "Advanced caching available";
+			} else {
+				throw new Error("Server not responding");
+			}
+		} catch (error) {
+			statusIndicator.className = "status-indicator offline";
+			statusText.textContent = "Using simple caching";
+		}
+	}
+
 	// ===== STATE MANAGEMENT FUNCTIONS =====
 
 	// Check if first-time analysis has been completed
 	async function isFirstTimeAnalysis() {
 		try {
-			const result = await chrome.storage.local.get(['firstAnalysisComplete']);
+			const result = await chrome.storage.local.get(["firstAnalysisComplete"]);
 			return !result.firstAnalysisComplete;
 		} catch (error) {
 			console.error("Error checking first-time analysis status:", error);
@@ -163,14 +201,15 @@ document.addEventListener("DOMContentLoaded", function () {
 	async function updateSmartCacheButton() {
 		try {
 			if (!smartCacheButton) return;
-			
+
 			const isFirstTime = await isFirstTimeAnalysis();
 			if (isFirstTime) {
 				smartCacheButton.disabled = false;
 				smartCacheButton.textContent = "🧠 Analyze + 🔎 Smart Cache";
 			} else {
 				smartCacheButton.disabled = true;
-				smartCacheButton.textContent = "✅ Analysis Complete - Auto-Caching Active";
+				smartCacheButton.textContent =
+					"✅ Analysis Complete - Auto-Caching Active";
 			}
 		} catch (error) {
 			console.error("Error updating smart cache button:", error);
@@ -183,8 +222,8 @@ document.addEventListener("DOMContentLoaded", function () {
 	async function loadAutoCachingPreference() {
 		try {
 			if (!autoCacheToggle) return;
-			
-			const result = await chrome.storage.local.get(['autoCachingEnabled']);
+
+			const result = await chrome.storage.local.get(["autoCachingEnabled"]);
 			const enabled = result.autoCachingEnabled !== false; // Default to enabled
 			autoCacheToggle.checked = enabled;
 		} catch (error) {
@@ -261,10 +300,10 @@ document.addEventListener("DOMContentLoaded", function () {
 			});
 			if (response?.ok) {
 				await loadCachedPages();
-				
+
 				// Mark first analysis as complete
 				await markFirstAnalysisComplete();
-				
+
 				alert(
 					`Smart caching complete. Cached ${response.scraped} pages from ${response.totalCandidates} candidates. Auto-caching is now active!`
 				);
@@ -340,57 +379,56 @@ document.addEventListener("DOMContentLoaded", function () {
 
 	async function cacheCurrentPage() {
 		try {
+			cacheButton.disabled = true;
+			cacheButton.textContent = "Caching...";
+
 			const [tab] = await chrome.tabs.query({
 				active: true,
 				currentWindow: true,
 			});
-			if (!tab || !tab.url) {
-				alert("Unable to get current page information");
-				return;
-			}
-			if (isRestrictedUrl(tab.url)) {
-				alert("Cannot cache this page type. Try another page.");
+
+			if (!tab || isRestrictedUrl(tab.url)) {
+				alert("Cannot cache this page (restricted URL)");
 				return;
 			}
 
-			// Ensure content script is present (handles first-open case)
-			const ok = await ensureContentScript(tab);
-			if (!ok) {
-				alert(
-					"Unable to access this page. Try refreshing the page and try again."
-				);
-				return;
-			}
+			// Ensure content script is loaded
+			await ensureContentScript(tab);
 
-			// Send message to content script to get page content
-			const response = await chrome.tabs.sendMessage(tab.id, {
-				action: "getPageContent",
-			});
-
-			if (response && response.content) {
-				const pageData = {
+			// Send message to background script to cache the page
+			chrome.runtime.sendMessage(
+				{
+					action: "getPageContent",
 					url: tab.url,
-					title: tab.title || "Untitled",
-					content: response.content,
-					timestamp: Date.now(),
-					favicon: tab.favIconUrl || "",
-				};
+					maxDepth: 0, // Can make this configurable later
+					forceSimple: false,
+				},
+				(response) => {
+					if (chrome.runtime.lastError) {
+						console.error("Runtime error:", chrome.runtime.lastError);
+						alert("Failed to cache page: " + chrome.runtime.lastError.message);
+						return;
+					}
 
-				// Save to storage
-				await saveCachedPage(pageData);
-
-				// Update UI
-				cacheButton.disabled = true;
-				cacheButton.textContent = "Already Cached";
-				loadCachedPages();
-
-				alert("Page cached successfully!");
-			} else {
-				alert("Unable to cache page content");
-			}
+					if (response?.success) {
+						const method =
+							response.method === "playwright" ? "🎭 Advanced" : "📄 Simple";
+						alert(`Page cached successfully! (${method} caching)`);
+						loadCachedPages(); // Refresh the list
+						checkServerStatus(); // Update server status
+					} else {
+						alert(
+							"Failed to cache page: " + (response?.error || "Unknown error")
+						);
+					}
+				}
+			);
 		} catch (error) {
 			console.error("Error caching page:", error);
-			alert("Error caching page. Please try again.");
+			alert("Failed to cache page: " + error.message);
+		} finally {
+			cacheButton.disabled = false;
+			cacheButton.textContent = "Cache This Page";
 		}
 	}
 

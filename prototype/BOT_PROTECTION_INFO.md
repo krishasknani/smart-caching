@@ -55,11 +55,11 @@ Some websites cannot be cached using automated tools like Playwright due to soph
 ```javascript
 // Export cookies from your browser and use them
 const cookies = [
-  {
-    name: "session_token",
-    value: "your_session_value",
-    domain: ".claude.com",
-  },
+	{
+		name: "session_token",
+		value: "your_session_value",
+		domain: ".claude.com",
+	},
 ];
 ```
 
@@ -78,6 +78,7 @@ Since browser extensions run in real user browsers, they bypass most bot detecti
 ## Technical Details
 
 When bot protection is detected, you'll see logs like:
+
 ```
 ⚠ Detected Cloudflare/bot protection: https://challenges.cloudflare.com/turnstile/...
 ⚠️ BOT PROTECTION DETECTED - This site uses Cloudflare or similar protection

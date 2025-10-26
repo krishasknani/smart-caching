@@ -24,7 +24,10 @@ chrome.history.onVisited.addListener(async (historyItem) => {
 		// Check if first analysis has been completed
 		const isFirstTime = await isFirstTimeAnalysis();
 		if (isFirstTime) {
-			console.log("First analysis not complete, skipping auto-cache for:", historyItem.url);
+			console.log(
+				"First analysis not complete, skipping auto-cache for:",
+				historyItem.url
+			);
 			return;
 		}
 
@@ -189,13 +192,45 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 					5
 				);
 
-				const result = await runSmartCaching(token, zone, queries, resultsPerQuery);
+				const result = await runSmartCaching(
+					token,
+					zone,
+					queries,
+					resultsPerQuery
+				);
 				sendResponse(result);
 			} catch (err) {
 				sendResponse({ ok: false, error: String(err?.message || err) });
 			}
 		})();
 		return true; // async
+	}
+
+	// Handle page caching with Playwright/simple fallback
+	if (request.action === "getPageContent") {
+		(async () => {
+			try {
+				await ensureConfigLoaded();
+
+				const result = await smartCachePage(request.url, {
+					maxDepth: request.maxDepth || 0,
+					forceSimple: request.forceSimple || false,
+				});
+
+				sendResponse({
+					success: true,
+					method: result.method,
+					stats: result.stats,
+				});
+			} catch (error) {
+				console.error("Error caching page:", error);
+				sendResponse({
+					success: false,
+					error: error.message,
+				});
+			}
+		})();
+		return true;
 	}
 });
 
@@ -217,6 +252,146 @@ async function ensureConfigLoaded() {
 chrome.runtime.onStartup.addListener(() => {
 	loadConfig();
 });
+
+// ===== PLAYWRIGHT SERVER INTEGRATION =====
+
+// Check if Playwright server is available
+async function checkPlaywrightServer() {
+	if (!CONFIG?.PLAYWRIGHT_ENABLED) {
+		return false;
+	}
+
+	try {
+		const response = await fetch(`${CONFIG.PLAYWRIGHT_SERVER_URL}/api/health`, {
+			method: "GET",
+			signal: AbortSignal.timeout(3000), // 3 second timeout
+		});
+
+		if (response.ok) {
+			const data = await response.json();
+			console.log("✅ Playwright server is available:", data);
+			return true;
+		}
+		return false;
+	} catch (error) {
+		console.log("⚠️ Playwright server not available:", error.message);
+		return false;
+	}
+}
+
+// Cache page using Playwright server
+async function cacheWithPlaywright(url, maxDepth = 0) {
+	console.log(`🎭 Attempting to cache with Playwright: ${url}`);
+
+	try {
+		const response = await fetch(`${CONFIG.PLAYWRIGHT_SERVER_URL}/api/cache`, {
+			method: "POST",
+			headers: {
+				"Content-Type": "application/json",
+			},
+			body: JSON.stringify({
+				url: url,
+				maxDepth: maxDepth,
+			}),
+			signal: AbortSignal.timeout(CONFIG.PLAYWRIGHT_TIMEOUT || 60000),
+		});
+
+		if (!response.ok) {
+			const errorData = await response.json();
+			throw new Error(errorData.error || "Playwright cache failed");
+		}
+
+		const result = await response.json();
+		console.log("✅ Playwright cache successful:", result);
+
+		// Get the cached content
+		const contentResponse = await fetch(
+			`${CONFIG.PLAYWRIGHT_SERVER_URL}/api/content/${result.cacheHash}`
+		);
+
+		if (!contentResponse.ok) {
+			throw new Error("Failed to retrieve cached content");
+		}
+
+		const contentData = await contentResponse.json();
+
+		// Store in Chrome extension storage
+		const pageData = {
+			url: result.url,
+			title: extractTitleFromHtml(contentData.content),
+			content: contentData.content,
+			timestamp: Date.now(),
+			favicon: "",
+			method: "playwright",
+			cacheHash: result.cacheHash,
+			stats: result.stats,
+		};
+
+		await saveCachedPage(pageData);
+
+		return {
+			success: true,
+			method: "playwright",
+			...result,
+		};
+	} catch (error) {
+		console.error("❌ Playwright cache error:", error);
+		throw error;
+	}
+}
+
+// Smart cache with Playwright fallback to simple scraping
+async function smartCachePage(url, options = {}) {
+	const { maxDepth = 0, forceSimple = false } = options;
+
+	console.log(`🚀 Starting smart cache for: ${url}`);
+
+	// Try Playwright first if enabled and not forced to use simple
+	if (!forceSimple && CONFIG?.PLAYWRIGHT_ENABLED) {
+		const serverAvailable = await checkPlaywrightServer();
+
+		if (serverAvailable) {
+			try {
+				console.log("📡 Using Playwright server...");
+				const result = await cacheWithPlaywright(url, maxDepth);
+				return result;
+			} catch (error) {
+				console.warn(
+					"⚠️ Playwright failed, falling back to simple scraping:",
+					error.message
+				);
+			}
+		} else {
+			console.log("⚠️ Playwright server not available, using simple scraping");
+		}
+	}
+
+	// Fallback to simple scraping
+	console.log("📄 Using simple scraping...");
+	try {
+		const { content, title } = await scrapePage(url);
+
+		const pageData = {
+			url: url,
+			title: title || url,
+			content: content,
+			timestamp: Date.now(),
+			favicon: "",
+			method: "simple",
+		};
+
+		await saveCachedPage(pageData);
+
+		return {
+			success: true,
+			method: "simple",
+			url: url,
+		};
+	} catch (error) {
+		console.error("❌ Simple scraping also failed:", error);
+		throw new Error(`All caching methods failed: ${error.message}`);
+	}
+}
 
 // Create Claude prompt for URL clustering
 function createClaudePrompt(data) {
@@ -563,21 +738,25 @@ function clampInt(v, min, max, dflt) {
 async function runSmartCaching(token, zone, queries, resultsPerQuery = 5) {
 	try {
 		// Validate inputs
-		if (!token || token.trim() === "") throw new Error("Missing Bright Data token");
-		if (!zone || zone.trim() === "") throw new Error("Missing Bright Data zone");
-		
+		if (!token || token.trim() === "")
+			throw new Error("Missing Bright Data token");
+		if (!zone || zone.trim() === "")
+			throw new Error("Missing Bright Data zone");
+
 		// Normalize and deduplicate queries
 		let normalizedQueries = Array.isArray(queries)
 			? queries.filter((q) => q && q.trim())
 			: [];
 		normalizedQueries = [
 			...new Set(
-				normalizedQueries.map((q) => q.replace(/\s+/g, " ").trim().toLowerCase())
+				normalizedQueries.map((q) =>
+					q.replace(/\s+/g, " ").trim().toLowerCase()
+				)
 			),
 		];
 		// Safety cap in case caller sends too many
 		normalizedQueries = normalizedQueries.slice(0, 10);
-		
+
 		if (normalizedQueries.length === 0) throw new Error("No queries provided");
 
 		// Search for URLs
@@ -639,7 +818,7 @@ async function runSmartCaching(token, zone, queries, resultsPerQuery = 5) {
 // Check if first-time analysis has been completed
 async function isFirstTimeAnalysis() {
 	try {
-		const result = await chrome.storage.local.get(['firstAnalysisComplete']);
+		const result = await chrome.storage.local.get(["firstAnalysisComplete"]);
 		return !result.firstAnalysisComplete;
 	} catch (error) {
 		console.error("Error checking first-time analysis status:", error);
@@ -650,7 +829,7 @@ async function isFirstTimeAnalysis() {
 // Check if auto-caching is enabled
 async function isAutoCachingEnabled() {
 	try {
-		const result = await chrome.storage.local.get(['autoCachingEnabled']);
+		const result = await chrome.storage.local.get(["autoCachingEnabled"]);
 		return result.autoCachingEnabled !== false; // Default to enabled
 	} catch (error) {
 		console.error("Error checking auto-caching status:", error);
@@ -661,12 +840,12 @@ async function isAutoCachingEnabled() {
 // Check if URL was recently analyzed
 async function isRecentlyAnalyzed(url) {
 	try {
-		const result = await chrome.storage.local.get(['analyzedUrls']);
+		const result = await chrome.storage.local.get(["analyzedUrls"]);
 		const analyzedUrls = result.analyzedUrls || {};
 		const lastAnalyzed = analyzedUrls[url];
-		
+
 		// Don't analyze if analyzed within last 24 hours
-		return lastAnalyzed && (Date.now() - lastAnalyzed) < 24 * 60 * 60 * 1000;
+		return lastAnalyzed && Date.now() - lastAnalyzed < 24 * 60 * 60 * 1000;
 	} catch (error) {
 		console.error("Error checking if URL was recently analyzed:", error);
 		return false;
@@ -676,7 +855,7 @@ async function isRecentlyAnalyzed(url) {
 // Mark URL as analyzed
 async function markUrlAsAnalyzed(url) {
 	try {
-		const result = await chrome.storage.local.get(['analyzedUrls']);
+		const result = await chrome.storage.local.get(["analyzedUrls"]);
 		const analyzedUrls = result.analyzedUrls || {};
 		analyzedUrls[url] = Date.now();
 		await chrome.storage.local.set({ analyzedUrls });
@@ -689,7 +868,7 @@ async function markUrlAsAnalyzed(url) {
 async function autoAnalyzeAndCache(url) {
 	try {
 		console.log("Auto-caching URL:", url);
-		
+
 		// Check if URL is restricted
 		if (isRestrictedUrl(url)) {
 			console.log("Skipping restricted URL:", url);
@@ -698,7 +877,7 @@ async function autoAnalyzeAndCache(url) {
 
 		// Ensure config is loaded
 		await ensureConfigLoaded();
-		
+
 		// Generate queries based on URL content
 		const queries = await generateQueriesFromUrl(url);
 		if (queries.length === 0) {
@@ -716,11 +895,18 @@ async function autoAnalyzeAndCache(url) {
 
 		// Run smart caching for this URL
 		const resultsPerQuery = CONFIG?.SERP_RESULTS_PER_QUERY || 3; // Fewer results for auto-caching
-		const response = await runSmartCaching(token, zone, queries, resultsPerQuery);
-		
+		const response = await runSmartCaching(
+			token,
+			zone,
+			queries,
+			resultsPerQuery
+		);
+
 		if (response?.ok) {
-			console.log(`Auto-caching complete for ${url}: ${response.scraped} pages cached`);
-			
+			console.log(
+				`Auto-caching complete for ${url}: ${response.scraped} pages cached`
+			);
+
 			// Show notification
 			await showAutoCacheNotification(url, response.scraped);
 		} else {
@@ -729,7 +915,6 @@ async function autoAnalyzeAndCache(url) {
 
 		// Mark URL as analyzed
 		await markUrlAsAnalyzed(url);
-		
 	} catch (error) {
 		console.error("Error in auto-analyze and cache:", error);
 	}
@@ -739,15 +924,15 @@ async function autoAnalyzeAndCache(url) {
 async function generateQueriesFromUrl(url) {
 	try {
 		console.log("Generating queries for URL:", url);
-		
+
 		// Try to get content from existing tab first
 		let pageContent = await getContentFromExistingTab(url);
-		
+
 		// If no existing tab, try background fetch
 		if (!pageContent) {
 			pageContent = await fetchPageContent(url);
 		}
-		
+
 		if (!pageContent) {
 			console.log("Could not extract content from URL:", url);
 			return [];
@@ -758,7 +943,7 @@ async function generateQueriesFromUrl(url) {
 			url: url,
 			title: extractTitleFromHtml(pageContent) || new URL(url).hostname,
 			content: pageContent,
-			timestamp: Date.now()
+			timestamp: Date.now(),
 		};
 
 		// Send to Claude for analysis
@@ -771,7 +956,7 @@ async function generateQueriesFromUrl(url) {
 		// Parse Claude response and extract queries
 		const queries = parseClaudeResponseForQueries(claudeResponse);
 		console.log("Generated queries from Claude:", queries);
-		
+
 		return queries.slice(0, 3); // Limit to 3 queries for auto-caching
 	} catch (error) {
 		console.error("Error generating queries from URL:", error);
@@ -790,7 +975,7 @@ async function getContentFromExistingTab(url) {
 			const response = await chrome.tabs.sendMessage(tab.id, {
 				action: "getPageContent",
 			});
-			
+
 			if (response && response.content) {
 				console.log("Got content from existing tab");
 				return response.content;
@@ -807,19 +992,20 @@ async function getContentFromExistingTab(url) {
 async function fetchPageContent(url) {
 	try {
 		console.log("Fetching page content via background fetch:", url);
-		
+
 		// Use fetch to get the page content
 		const response = await fetch(url, {
-			method: 'GET',
+			method: "GET",
 			headers: {
-				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-			}
+				"User-Agent":
+					"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+			},
 		});
-		
+
 		if (!response.ok) {
 			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
 		}
-		
+
 		const html = await response.text();
 		console.log("Successfully fetched page content via background fetch");
 		return html;
@@ -834,20 +1020,20 @@ async function callClaudeAPIForSingleUrl(data) {
 	try {
 		// Ensure config is loaded
 		await ensureConfigLoaded();
-		
+
 		if (!CONFIG.CLAUDE_API_KEY) {
 			throw new Error("Claude API key not found in configuration.");
 		}
 
 		const prompt = createClaudePromptForSingleUrl(data);
-		
+
 		const response = await fetch(CONFIG.CLAUDE_API_URL, {
-			method: 'POST',
+			method: "POST",
 			headers: {
-				'Content-Type': 'application/json',
-				'x-api-key': CONFIG.CLAUDE_API_KEY,
-				'anthropic-version': '2023-06-01',
-				'anthropic-dangerous-direct-browser-access': 'true'
+				"Content-Type": "application/json",
+				"x-api-key": CONFIG.CLAUDE_API_KEY,
+				"anthropic-version": "2023-06-01",
+				"anthropic-dangerous-direct-browser-access": "true",
 			},
 			body: JSON.stringify({
 				model: CONFIG.CLAUDE_MODEL,
@@ -855,15 +1041,19 @@ async function callClaudeAPIForSingleUrl(data) {
 				messages: [
 					{
 						role: "user",
-						content: prompt
-					}
-				]
-			})
+						content: prompt,
+					},
+				],
+			}),
 		});
 
 		if (!response.ok) {
 			const errorData = await response.json();
-			throw new Error(`Claude API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+			throw new Error(
+				`Claude API error: ${response.status} - ${
+					errorData.error?.message || "Unknown error"
+				}`
+			);
 		}
 
 		const result = await response.json();
@@ -898,32 +1088,32 @@ function parseClaudeResponseForQueries(claudeResponse) {
 	try {
 		// Clean the response to extract JSON from markdown code blocks
 		let cleanResponse = claudeResponse.trim();
-		
+
 		// Remove markdown code block markers if present
-		if (cleanResponse.startsWith('```json')) {
-			cleanResponse = cleanResponse.replace(/^```json\s*/, '');
+		if (cleanResponse.startsWith("```json")) {
+			cleanResponse = cleanResponse.replace(/^```json\s*/, "");
 		}
-		if (cleanResponse.startsWith('```')) {
-			cleanResponse = cleanResponse.replace(/^```\s*/, '');
+		if (cleanResponse.startsWith("```")) {
+			cleanResponse = cleanResponse.replace(/^```\s*/, "");
 		}
-		if (cleanResponse.endsWith('```')) {
-			cleanResponse = cleanResponse.replace(/\s*```$/, '');
+		if (cleanResponse.endsWith("```")) {
+			cleanResponse = cleanResponse.replace(/\s*```$/, "");
 		}
-		
+
 		// Additional cleaning for common JSON issues
 		cleanResponse = cleanResponse.trim();
-		
+
 		// Try to find the JSON array if it's embedded in other text
 		const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
 		if (jsonMatch) {
 			cleanResponse = jsonMatch[0];
 		}
-		
+
 		const queries = JSON.parse(cleanResponse);
-		
+
 		// Validate that it's an array of strings
-		if (Array.isArray(queries) && queries.every(q => typeof q === 'string')) {
-			return queries.filter(q => q.trim().length > 0);
+		if (Array.isArray(queries) && queries.every((q) => typeof q === "string")) {
+			return queries.filter((q) => q.trim().length > 0);
 		} else {
 			throw new Error("Invalid query format");
 		}
@@ -954,17 +1144,19 @@ async function showAutoCacheNotification(url, pagesCached) {
 	try {
 		// Create a simple notification
 		const notification = {
-			type: 'basic',
-			iconUrl: 'icons/icon48.png',
-			title: 'Cache-22 Auto-Caching',
-			message: `Cached ${pagesCached} related pages for ${new URL(url).hostname}`,
-			priority: 1
+			type: "basic",
+			iconUrl: "icons/icon48.png",
+			title: "Cache-22 Auto-Caching",
+			message: `Cached ${pagesCached} related pages for ${
+				new URL(url).hostname
+			}`,
+			priority: 1,
 		};
-		
+
 		// Note: Chrome notifications require permission in manifest
 		// For now, we'll just log it
 		console.log("Auto-cache notification:", notification.message);
-		
+
 		// TODO: Implement proper notification system
 	} catch (error) {
 		console.error("Error showing auto-cache notification:", error);
