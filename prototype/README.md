@@ -10,6 +10,7 @@ A standalone prototype that demonstrates full-featured website caching with Java
 - ✅ **Linked Page Caching** - Automatically caches same-origin linked pages (configurable depth)
 - ✅ **Offline Viewing** - Serves cached content locally without internet
 - ✅ **Authentication Support** - Can cache pages requiring login (with cookies)
+- ✅ **Bot Protection Detection** - Identifies sites with anti-bot measures
 
 ## Quick Start
 
@@ -193,7 +194,7 @@ Cache a website with all assets.
 {
   "url": "https://example.com",
   "maxDepth": 2,
-  "cookies": [] // optional
+  "cookies": [] // optional - authentication cookies
 }
 ```
 

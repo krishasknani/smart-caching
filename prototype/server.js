@@ -323,10 +323,15 @@ async function cachePage(url, options = {}) {
   await fs.mkdir(path.join(assetsDir, "misc"), { recursive: true });
   await fs.mkdir(pagesDir, { recursive: true });
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({
+    headless: true,
+    slowMo: 100, // Slow down operations by 100ms for debugging
+  });
+
   const context = await browser.newContext({
     userAgent:
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    viewport: { width: 1920, height: 1080 },
   });
 
   // Add cookies if provided
@@ -369,6 +374,16 @@ async function cachePage(url, options = {}) {
       console.log(`  ⚠ PAGE CRASH EVENT FIRED!`);
     });
 
+    page.on("pageerror", (error) => {
+      console.log(`  ⚠ PAGE ERROR: ${error.message}`);
+    });
+
+    page.on("console", (msg) => {
+      if (msg.type() === "error") {
+        console.log(`  ⚠ CONSOLE ERROR: ${msg.text()}`);
+      }
+    });
+
     page.on("framenavigated", (frame) => {
       if (frame === page.mainFrame()) {
         console.log(`  → Frame navigated to: ${frame.url()}`);
@@ -389,6 +404,50 @@ async function cachePage(url, options = {}) {
         url.includes("favicon")
       ) {
         console.log(`  → Image request: ${url}`);
+      }
+    });
+
+    // Intercept and mock failing API requests that might cause page to close
+    await page.route("**/*", async (route, request) => {
+      const url = route.request().url();
+
+      // Special handling for API routes that might fail
+      if (url.includes("/api/country")) {
+        console.log(
+          "  → Intercepting /api/country request, providing mock response"
+        );
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ country: "US", region: "Americas" }),
+        });
+      } else if (url.includes("/api/user")) {
+        console.log(
+          "  → Intercepting /api/user request, providing mock response"
+        );
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ logged_in: false }),
+        });
+      } else if (
+        url.includes("recaptcha") ||
+        url.includes("gstatic.com/recaptcha")
+      ) {
+        console.log("  ⚠ Blocking reCAPTCHA request:", url);
+        await route.abort();
+      } else if (
+        url.includes("cloudflare") ||
+        url.includes("cf-challenge") ||
+        url.includes("turnstile")
+      ) {
+        console.log("  ⚠ Detected Cloudflare/bot protection:", url);
+        // Set a flag that this site has bot protection
+        page._hasBotProtection = true;
+        await route.continue();
+      } else {
+        // Continue with normal request
+        await route.continue();
       }
     });
 
@@ -455,15 +514,99 @@ async function cachePage(url, options = {}) {
     try {
       // Navigate and wait for network to be idle
       console.log(`  → Navigating to ${pageUrl}...`);
-      await page.goto(pageUrl, {
-        waitUntil: "networkidle",
-        timeout: 60000,
-      });
+
+      let response;
+      try {
+        response = await page.goto(pageUrl, {
+          waitUntil: "networkidle",
+          timeout: 60000,
+        });
+      } catch (navError) {
+        console.error(`  ❌ Navigation error: ${navError.message}`);
+
+        // Check for specific error patterns
+        if (navError.message.includes("net::ERR_ABORTED")) {
+          console.error(`  → Possible bot detection - connection was aborted`);
+        } else if (navError.message.includes("Timeout")) {
+          console.error(
+            `  → Navigation timeout - site may be blocking automated access`
+          );
+        } else if (navError.message.includes("net::ERR_FAILED")) {
+          console.error(`  → Network error - check if the site is accessible`);
+        }
+
+        throw navError;
+      }
+
+      // Check response status
+      if (response) {
+        const status = response.status();
+        console.log(`  → Response status: ${status}`);
+
+        if (status === 403) {
+          throw new Error(
+            "HTTP 403 Forbidden - site is blocking automated access"
+          );
+        } else if (status === 503) {
+          throw new Error(
+            "HTTP 503 Service Unavailable - possible bot detection"
+          );
+        } else if (status >= 400) {
+          throw new Error(`HTTP ${status} error`);
+        }
+      }
+
       console.log(
         `  → Navigation complete, page is ${
           page.isClosed() ? "CLOSED" : "OPEN"
         }`
       );
+
+      // For sites that might close quickly, try to capture content immediately
+      let quickContent = "";
+      try {
+        quickContent = await page.content();
+        console.log(
+          `  → Quick capture: Got ${quickContent.length} bytes of HTML`
+        );
+
+        // Check if bot protection was detected
+        if (page._hasBotProtection) {
+          console.log(
+            `  ⚠️ BOT PROTECTION DETECTED - This site uses Cloudflare or similar protection`
+          );
+          throw new Error(
+            "Site is protected by anti-bot measures (Cloudflare/reCAPTCHA). Consider manual caching or providing authentication cookies."
+          );
+        }
+
+        // If Claude or similar problematic site, save immediately
+        if (
+          pageUrl.includes("claude.com") ||
+          pageUrl.includes("stackoverflow.com")
+        ) {
+          console.log(
+            `  → Detected problematic site, saving content immediately...`
+          );
+          const quickSavePath = path.join(pagesDir, "quick-capture.html");
+          await fs.writeFile(quickSavePath, quickContent);
+
+          // Try to extract title quickly
+          const title = await page.title().catch(() => "Untitled");
+          console.log(`  → Quick title: ${title}`);
+        }
+      } catch (e) {
+        console.log(`  → Quick capture failed: ${e.message}`);
+      }
+
+      // Take a screenshot for debugging (especially useful for sites that might block access)
+      try {
+        const screenshotPath = path.join(cacheDir, "debug-navigation.png");
+        await page.screenshot({ path: screenshotPath, fullPage: false });
+        console.log(`  → Debug screenshot saved: ${screenshotPath}`);
+      } catch (e) {
+        console.log(`  → Could not save debug screenshot: ${e.message}`);
+      }
 
       console.log(`  → Waiting for content to load...`);
       // Wait a bit more for any lazy-loaded content
