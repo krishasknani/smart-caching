@@ -13,6 +13,7 @@
 	],
 	"host_permissions": [
 		"https://api.brightdata.com/*",
+		"https://inference.baseten.co/*",
 		"https://*/",
 		"http://*/"
 	],

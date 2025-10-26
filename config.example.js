@@ -2,8 +2,8 @@
 // Copy this file to config.js and add your actual API key
 
 const CONFIG = {
-	// Claude API Configuration
-	CLAUDE_API_KEY: "your-claude-api-key-here",
+	// Baseten API Configuration
+	BASETEN_API_KEY: "your-baseten-api-key-here",
 
 	// Bright Data SERP API (used for smart caching discovery)
 	// Get credentials at https://brightdata.com/
@@ -13,8 +13,8 @@ const CONFIG = {
 	SERP_RESULTS_PER_QUERY: 5,
 
 	// API Settings
-	CLAUDE_API_URL: "https://api.anthropic.com/v1/messages",
-	CLAUDE_MODEL: "claude-3-5-sonnet-20241022",
+	BASETEN_API_URL: "https://inference.baseten.co/v1/chat/completions",
+	BASETEN_MODEL: "openai/gpt-oss-120b",
 
 	// Cache Settings
 	CACHE_DURATION_HOURS: 24,

@@ -49,9 +49,9 @@ async function loadConfig() {
 		}
 
 		console.log("Configuration loaded successfully:", {
-			hasApiKey: !!CONFIG.CLAUDE_API_KEY,
-			apiUrl: CONFIG.CLAUDE_API_URL,
-			model: CONFIG.CLAUDE_MODEL,
+			hasApiKey: !!CONFIG.BASETEN_API_KEY,
+			apiUrl: CONFIG.BASETEN_API_URL,
+			model: CONFIG.BASETEN_MODEL,
 			cacheDuration: CONFIG.CACHE_DURATION_HOURS,
 		});
 		return true;
@@ -67,21 +67,21 @@ function extractConfigFromText(configText) {
 		const config = {};
 
 		// Extract API key
-		const apiKeyMatch = configText.match(/CLAUDE_API_KEY:\s*"([^"]+)"/);
+		const apiKeyMatch = configText.match(/BASETEN_API_KEY:\s*"([^"]+)"/);
 		if (apiKeyMatch) {
-			config.CLAUDE_API_KEY = apiKeyMatch[1];
+			config.BASETEN_API_KEY = apiKeyMatch[1];
 		}
 
 		// Extract API URL
-		const apiUrlMatch = configText.match(/CLAUDE_API_URL:\s*"([^"]+)"/);
+		const apiUrlMatch = configText.match(/BASETEN_API_URL:\s*"([^"]+)"/);
 		if (apiUrlMatch) {
-			config.CLAUDE_API_URL = apiUrlMatch[1];
+			config.BASETEN_API_URL = apiUrlMatch[1];
 		}
 
 		// Extract model
-		const modelMatch = configText.match(/CLAUDE_MODEL:\s*"([^"]+)"/);
+		const modelMatch = configText.match(/BASETEN_MODEL:\s*"([^"]+)"/);
 		if (modelMatch) {
-			config.CLAUDE_MODEL = modelMatch[1];
+			config.BASETEN_MODEL = modelMatch[1];
 		}
 
 		// Extract cache duration
@@ -133,10 +133,10 @@ function extractConfigFromText(configText) {
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-	if (request.action === "analyzeWithClaude") {
+	if (request.action === "analyzeWithBaseten") {
 		// Ensure config is loaded before processing
 		ensureConfigLoaded()
-			.then(() => handleClaudeAnalysis(request.data))
+			.then(() => handleBasetenAnalysis(request.data))
 			.then((result) => sendResponse({ success: true, data: result }))
 			.catch((error) => sendResponse({ success: false, error: error.message }));
 		return true; // Keep message channel open for async response
@@ -243,8 +243,8 @@ chrome.runtime.onStartup.addListener(() => {
 	loadConfig();
 });
 
-// Create Claude prompt for URL clustering
-function createClaudePrompt(data) {
+// Create prompt for URL clustering
+function createAnalysisPrompt(data) {
 	// Extract URLs from history and tabs, but limit and clean them
 	const historyUrls = data.browser_history
 		.map((item) => item.url)
@@ -263,132 +263,195 @@ ${historyUrls.join("\n")}
 CURRENT TABS URLs (${data.total_open_tabs} total):
 ${tabUrls.join("\n")}
 
-Please return a JSON array of categories with the following structure:
-[
-  {
-    "category_name": "string",
-    "description": "string explaining what this category represents",
-    "urls": ["array of relevant URLs from the data"],
-    "confidence": 0.95,
-    "keywords": ["array of keywords that define this category"]
-  }
-]
-
 Focus on creating meaningful categories that reflect the user's interests and browsing patterns. Consider:
 - Website domains and purposes
 - Content themes and topics
 - User behavior patterns
-- Frequency of visits
-
-IMPORTANT: Return ONLY valid JSON. Do not include any markdown formatting, code blocks, or additional text.`;
+- Frequency of visits`;
 }
 
-// Call Claude API to analyze data
-async function callClaudeAPI(data) {
+// Define JSON schema for structured output
+function getCategoriesSchema() {
+	return {
+		name: "browsing_categories",
+		description: "Categories of URLs from browser history and tabs",
+		schema: {
+			type: "object",
+			properties: {
+				categories: {
+					type: "array",
+					description: "Array of categorized URLs",
+					items: {
+						type: "object",
+						properties: {
+							category_name: {
+								type: "string",
+								description: "Name of the category",
+							},
+							description: {
+								type: "string",
+								description: "Description of what this category represents",
+							},
+							urls: {
+								type: "array",
+								description: "Relevant URLs from the data",
+								items: {
+									type: "string",
+								},
+							},
+							confidence: {
+								type: "number",
+								description: "Confidence score between 0 and 1",
+								minimum: 0,
+								maximum: 1,
+							},
+							keywords: {
+								type: "array",
+								description: "Keywords that define this category",
+								items: {
+									type: "string",
+								},
+							},
+						},
+						required: [
+							"category_name",
+							"description",
+							"urls",
+							"confidence",
+							"keywords",
+						],
+					},
+				},
+			},
+			required: ["categories"],
+		},
+		strict: true,
+	};
+}
+
+// Call Baseten API to analyze data
+async function callBasetenAPI(data) {
 	try {
 		// Config should already be loaded by ensureConfigLoaded()
-		if (!CONFIG.CLAUDE_API_KEY) {
-			throw new Error("Claude API key not found in configuration.");
+		if (!CONFIG.BASETEN_API_KEY) {
+			throw new Error("Baseten API key not found in configuration.");
 		}
 
-		const prompt = createClaudePrompt(data);
+		const prompt = createAnalysisPrompt(data);
 
-		const response = await fetch(CONFIG.CLAUDE_API_URL, {
+		const response = await fetch(CONFIG.BASETEN_API_URL, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				"x-api-key": CONFIG.CLAUDE_API_KEY,
-				"anthropic-version": "2023-06-01",
-				"anthropic-dangerous-direct-browser-access": "true",
+				Authorization: `Api-Key ${CONFIG.BASETEN_API_KEY}`,
 			},
 			body: JSON.stringify({
-				model: CONFIG.CLAUDE_MODEL,
-				max_tokens: 4000,
+				model: CONFIG.BASETEN_MODEL,
 				messages: [
+					{
+						role: "system",
+						content:
+							"You are an expert at analyzing browsing patterns and categorizing URLs. Extract meaningful categories from browser history and tabs.",
+					},
 					{
 						role: "user",
 						content: prompt,
 					},
 				],
+				response_format: {
+					type: "json_object",
+					json_schema: getCategoriesSchema(),
+				},
+				stream: false,
+				top_p: 1,
+				max_tokens: 4000,
+				temperature: 1,
+				presence_penalty: 0,
+				frequency_penalty: 0,
 			}),
 		});
 
 		if (!response.ok) {
 			const errorData = await response.json();
 			throw new Error(
-				`Claude API error: ${response.status} - ${
+				`Baseten API error: ${response.status} - ${
 					errorData.error?.message || "Unknown error"
 				}`
 			);
 		}
 
 		const result = await response.json();
-		console.log("Claude API response:", result);
-		console.log("Claude response content:", result.content[0].text);
-		return result.content[0].text;
+		const content = result.choices[0].message.content;
+
+		// Parse the structured JSON response
+		const parsedContent = JSON.parse(content);
+
+		// Extract the categories - handle both array and object formats
+		let categories = parsedContent.categories || [];
+
+		// If categories is an object (not array), convert it to array format
+		if (
+			categories &&
+			typeof categories === "object" &&
+			!Array.isArray(categories)
+		) {
+			categories = Object.entries(categories).map(([key, value]) => {
+				// Handle different value formats
+				let urls = [];
+				let description = "";
+				let confidence = 0.9;
+				let keywords = [key.replace(/_/g, " ").toLowerCase()];
+
+				if (Array.isArray(value)) {
+					// Value is directly an array of URLs
+					urls = value;
+					description = `Category: ${key.replace(/_/g, " ")}`;
+				} else if (typeof value === "object") {
+					// Value is an object with properties
+					description =
+						value.description || `Category: ${key.replace(/_/g, " ")}`;
+					urls = value.example_urls || value.urls || [];
+					confidence = value.confidence || 0.9;
+					keywords = value.keywords || keywords;
+				}
+
+				return {
+					category_name: key.replace(/_/g, " "), // Convert underscores to spaces
+					description,
+					urls,
+					confidence,
+					keywords,
+				};
+			});
+		}
+
+		return categories;
 	} catch (error) {
-		console.error("Error calling Claude API:", error);
+		console.error("Error calling Baseten API:", error);
 		throw error;
 	}
 }
 
-// Handle Claude analysis request
-async function handleClaudeAnalysis(data) {
+// Handle Baseten analysis request
+async function handleBasetenAnalysis(data) {
 	try {
-		console.log("Starting Claude analysis...");
+		// Call Baseten API - now returns parsed categories array directly
+		const categories = await callBasetenAPI(data);
 
-		// Call Claude API
-		const claudeResponse = await callClaudeAPI(data);
-
-		// Parse the JSON response
-		let categories;
-		try {
-			console.log("Raw Claude response text:", claudeResponse);
-			console.log("Attempting to parse as JSON...");
-
-			// Clean the response to extract JSON from markdown code blocks
-			let cleanResponse = claudeResponse.trim();
-
-			// Remove markdown code block markers if present
-			if (cleanResponse.startsWith("```json")) {
-				cleanResponse = cleanResponse.replace(/^```json\s*/, "");
-			}
-			if (cleanResponse.startsWith("```")) {
-				cleanResponse = cleanResponse.replace(/^```\s*/, "");
-			}
-			if (cleanResponse.endsWith("```")) {
-				cleanResponse = cleanResponse.replace(/\s*```$/, "");
-			}
-
-			// Additional cleaning for common JSON issues
-			cleanResponse = cleanResponse.trim();
-
-			// Try to find the JSON array if it's embedded in other text
-			const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
-			if (jsonMatch) {
-				cleanResponse = jsonMatch[0];
-			}
-
-			console.log("Cleaned response:", cleanResponse);
-			categories = JSON.parse(cleanResponse);
-			console.log("Successfully parsed categories:", categories);
-		} catch (parseError) {
-			console.error("Error parsing Claude response:", parseError);
-			console.error("Raw response that failed to parse:", claudeResponse);
-			console.error("Parse error details:", parseError.message);
-			throw new Error("Failed to parse Claude response. Please try again.");
+		// Validate categories
+		if (!Array.isArray(categories)) {
+			throw new Error("API did not return an array of categories");
 		}
 
 		// Cache the results
 		await chrome.storage.local.set({
-			claudeCategories: categories,
-			claudeAnalysisTimestamp: Date.now(),
+			basetenCategories: categories,
+			basetenAnalysisTimestamp: Date.now(),
 		});
 
-		console.log("Claude analysis completed:", categories);
 		return categories;
 	} catch (error) {
-		console.error("Error in Claude analysis:", error);
+		console.error("Error in Baseten analysis:", error);
 		throw error;
 	}
 }

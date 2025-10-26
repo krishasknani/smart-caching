@@ -56,21 +56,21 @@ document.addEventListener("DOMContentLoaded", function () {
 			const config = {};
 
 			// Extract API key
-			const apiKeyMatch = configText.match(/CLAUDE_API_KEY:\s*"([^"]+)"/);
+			const apiKeyMatch = configText.match(/BASETEN_API_KEY:\s*"([^"]+)"/);
 			if (apiKeyMatch) {
-				config.CLAUDE_API_KEY = apiKeyMatch[1];
+				config.BASETEN_API_KEY = apiKeyMatch[1];
 			}
 
 			// Extract API URL
-			const apiUrlMatch = configText.match(/CLAUDE_API_URL:\s*"([^"]+)"/);
+			const apiUrlMatch = configText.match(/BASETEN_API_URL:\s*"([^"]+)"/);
 			if (apiUrlMatch) {
-				config.CLAUDE_API_URL = apiUrlMatch[1];
+				config.BASETEN_API_URL = apiUrlMatch[1];
 			}
 
 			// Extract model
-			const modelMatch = configText.match(/CLAUDE_MODEL:\s*"([^"]+)"/);
+			const modelMatch = configText.match(/BASETEN_MODEL:\s*"([^"]+)"/);
 			if (modelMatch) {
-				config.CLAUDE_MODEL = modelMatch[1];
+				config.BASETEN_MODEL = modelMatch[1];
 			}
 
 			// Extract cache duration
@@ -157,23 +157,23 @@ document.addEventListener("DOMContentLoaded", function () {
 			}
 
 			// Get categories from storage; if missing, run analysis first
-			let { claudeCategories } = await chrome.storage.local.get([
-				"claudeCategories",
+			let { basetenCategories } = await chrome.storage.local.get([
+				"basetenCategories",
 			]);
-			if (!Array.isArray(claudeCategories) || claudeCategories.length === 0) {
+			if (!Array.isArray(basetenCategories) || basetenCategories.length === 0) {
 				await analyzeBrowsingPatterns();
-				({ claudeCategories } = await chrome.storage.local.get([
-					"claudeCategories",
+				({ basetenCategories } = await chrome.storage.local.get([
+					"basetenCategories",
 				]));
 			}
-			if (!Array.isArray(claudeCategories) || claudeCategories.length === 0) {
+			if (!Array.isArray(basetenCategories) || basetenCategories.length === 0) {
 				alert(
 					"No categories available to generate queries. Try again after analysis."
 				);
 				return;
 			}
 
-			const queries = generateQueriesFromCategories(claudeCategories, 10);
+			const queries = generateQueriesFromCategories(basetenCategories, 10);
 			if (queries.length === 0) {
 				alert("No queries could be generated from categories.");
 				return;
@@ -487,8 +487,6 @@ document.addEventListener("DOMContentLoaded", function () {
 	// Fetch ALL browser history (not just 10 items)
 	async function fetchAllBrowserHistory() {
 		try {
-			console.log("Fetching all browser history...");
-
 			// Get all history items (Chrome limits to 100,000 by default)
 			const historyItems = await chrome.history.search({
 				text: "",
@@ -506,7 +504,6 @@ document.addEventListener("DOMContentLoaded", function () {
 					lastVisitTime: item.lastVisitTime || 0,
 				}));
 
-			console.log(`Fetched ${validHistory.length} history items`);
 			return validHistory;
 		} catch (error) {
 			console.error("Error fetching all browser history:", error);
@@ -517,8 +514,6 @@ document.addEventListener("DOMContentLoaded", function () {
 	// Fetch ALL open tabs (not just 10 items)
 	async function fetchAllOpenTabs() {
 		try {
-			console.log("Fetching all open tabs...");
-
 			// Get all tabs across all windows
 			const tabs = await chrome.tabs.query({});
 
@@ -533,7 +528,6 @@ document.addEventListener("DOMContentLoaded", function () {
 					index: tab.index,
 				}));
 
-			console.log(`Fetched ${validTabs.length} open tabs`);
 			return validTabs;
 		} catch (error) {
 			console.error("Error fetching all open tabs:", error);
@@ -541,11 +535,9 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Prepare data for Claude API
+	// Prepare data for Baseten API
 	async function prepareDataForClaude() {
 		try {
-			console.log("Preparing data for Claude analysis...");
-
 			const [historyData, tabsData] = await Promise.all([
 				fetchAllBrowserHistory(),
 				fetchAllOpenTabs(),
@@ -559,19 +551,14 @@ document.addEventListener("DOMContentLoaded", function () {
 				total_open_tabs: tabsData.length,
 			};
 
-			console.log("Data prepared for Claude:", {
-				historyItems: historyData.length,
-				openTabs: tabsData.length,
-			});
-
 			return dataForClaude;
 		} catch (error) {
-			console.error("Error preparing data for Claude:", error);
+			console.error("Error preparing data for analysis:", error);
 			return null;
 		}
 	}
 
-	// Analyze browsing patterns with Claude
+	// Analyze browsing patterns with Baseten
 	async function analyzeBrowsingPatterns() {
 		try {
 			// Show loading state (guard if analyzeButton no longer exists)
@@ -580,7 +567,7 @@ document.addEventListener("DOMContentLoaded", function () {
 				analyzeButton.textContent = "🧠 Analyzing...";
 			}
 			categoriesList.innerHTML =
-				'<div class="loading-state">Analyzing your browsing patterns with Claude AI...</div>';
+				'<div class="loading-state">Analyzing your browsing patterns with Baseten AI...</div>';
 
 			// Prepare data
 			const data = await prepareDataForClaude();
@@ -588,9 +575,9 @@ document.addEventListener("DOMContentLoaded", function () {
 				throw new Error("Failed to prepare data for analysis");
 			}
 
-			// Send to background script for Claude analysis
+			// Send to background script for Baseten analysis
 			const response = await chrome.runtime.sendMessage({
-				action: "analyzeWithClaude",
+				action: "analyzeWithBaseten",
 				data: data,
 			});
 
@@ -616,7 +603,7 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Display categories returned by Claude
+	// Display categories returned by Baseten
 	function displayCategories(categories) {
 		try {
 			if (!categories || categories.length === 0) {
@@ -693,18 +680,18 @@ document.addEventListener("DOMContentLoaded", function () {
 			}
 
 			const result = await chrome.storage.local.get([
-				"claudeCategories",
-				"claudeAnalysisTimestamp",
+				"basetenCategories",
+				"basetenAnalysisTimestamp",
 			]);
 
-			if (result.claudeCategories && result.claudeAnalysisTimestamp) {
+			if (result.basetenCategories && result.basetenAnalysisTimestamp) {
 				// Check if analysis is less than configured hours old
 				const hoursSinceAnalysis =
-					(Date.now() - result.claudeAnalysisTimestamp) / (1000 * 60 * 60);
+					(Date.now() - result.basetenAnalysisTimestamp) / (1000 * 60 * 60);
 				const cacheDurationHours = CONFIG ? CONFIG.CACHE_DURATION_HOURS : 24; // Use config or default
 
 				if (hoursSinceAnalysis < cacheDurationHours) {
-					displayCategories(result.claudeCategories);
+					displayCategories(result.basetenCategories);
 					console.log(
 						"Loaded cached categories from",
 						Math.round(hoursSinceAnalysis),
