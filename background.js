@@ -1,6 +1,6 @@
 // Background service worker
 chrome.runtime.onInstalled.addListener(async () => {
-	console.log("Smart Caching Extension installed");
+	console.log("Cache-22 installed");
 	// Load config immediately on installation
 	await loadConfig();
 });

@@ -1,4 +1,4 @@
-// Example configuration file for Smart Caching Extension
+// Example configuration file for Cache-22 Extension
 // Copy this file to config.js and add your actual API key
 
 const CONFIG = {

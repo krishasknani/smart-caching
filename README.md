@@ -1,4 +1,4 @@
-# Smart Caching Chrome Extension
+# Cache-22 Chrome Extension
 
 A Chrome extension that allows users to manually cache web pages for offline viewing. This is the MVP version with basic caching functionality.
 
@@ -18,7 +18,7 @@ A Chrome extension that allows users to manually cache web pages for offline vie
    - Open Chrome and go to `chrome://extensions/`
    - Enable "Developer mode" (toggle in top right)
    - Click "Load unpacked"
-   - Select the `Smart Caching` folder
+   - Select the `smart-caching` folder
 
 2. **Test the Extension**:
    - Visit any webpage
@@ -29,7 +29,7 @@ A Chrome extension that allows users to manually cache web pages for offline vie
 ### File Structure
 
 ```
-Smart Caching/
+smart-caching/
 ├── manifest.json          # Extension configuration
 ├── popup.html            # Extension popup UI
 ├── popup.js              # Popup functionality

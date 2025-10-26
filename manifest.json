@@ -1,6 +1,6 @@
 {
 	"manifest_version": 3,
-	"name": "Smart Caching Extension",
+	"name": "Cache-22",
 	"version": "1.0.0",
 	"description": "Cache web pages for offline viewing",
 	"permissions": [
@@ -19,7 +19,7 @@
 
 	"action": {
 		"default_popup": "popup.html",
-		"default_title": "Smart Caching",
+		"default_title": "Cache-22",
 		"default_icon": {
 			"16": "icons/icon16.png",
 			"48": "icons/icon48.png",
