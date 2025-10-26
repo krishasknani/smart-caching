@@ -171,24 +171,35 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 				if (!zone) throw new Error("Missing Bright Data zone");
 				if (queries.length === 0) throw new Error("No queries provided");
 
+				console.log(
+					`Starting Bright Data SERP search for ${queries.length} queries:`,
+					queries
+				);
 				const allUrls = [];
 				for (const q of queries) {
+					console.log(`Searching for: "${q}"`);
 					const urls = await brightDataSearch(token, zone, q, resultsPerQuery);
+					console.log(`Found ${urls.length} URLs for "${q}":`, urls);
 					allUrls.push(...urls);
 				}
 
 				const candidates = dedupeStrings(
 					allUrls.map(canonicalizeUrl).filter(Boolean)
 				);
+				console.log(`Total unique candidate URLs: ${candidates.length}`);
 
 				const existing =
 					(await chrome.storage.local.get(["cachedPages"]))?.cachedPages || [];
 				const existingSet = new Set(existing.map((p) => p.url));
 				const toScrape = candidates.filter((u) => !existingSet.has(u));
+				console.log(
+					`URLs to scrape (${toScrape.length} new, ${existingSet.size} already cached)`
+				);
 
 				const results = [];
 				for (const url of toScrape) {
 					try {
+						console.log(`Scraping: ${url}`);
 						const { content, title } = await scrapePage(url);
 						if (!content) throw new Error("Empty content");
 						const pageData = {
@@ -199,6 +210,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 							favicon: "",
 						};
 						await saveCachedPage(pageData);
+						console.log(`Successfully cached: ${title || url}`);
 						results.push({ url, status: "cached" });
 					} catch (err) {
 						console.warn("Failed to cache", url, err);
@@ -210,6 +222,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 					}
 				}
 
+				console.log(
+					`🎉 Scraping complete! Cached ${
+						results.filter((r) => r.status === "cached").length
+					}/${toScrape.length} pages`
+				);
 				sendResponse({
 					ok: true,
 					totalCandidates: candidates.length,
@@ -249,83 +266,95 @@ function createAnalysisPrompt(data) {
 	const historyUrls = data.browser_history
 		.map((item) => item.url)
 		.filter((url) => url && url.length < 200) // Filter out very long URLs
-		.slice(0, 50); // Limit to first 50 for prompt length
+		.slice(0, 30); // Reduced from 50 to 30
 
 	const tabUrls = data.current_tabs
 		.map((tab) => tab.url)
-		.filter((url) => url && url.length < 200); // Filter out very long URLs
+		.filter((url) => url && url.length < 200) // Filter out very long URLs
+		.slice(0, 20); // Limit tabs too
 
 	return `Analyze the following browser history and current tabs. Group the URLs into relevant categories/topics based on their content and purpose.
 
-BROWSER HISTORY URLs (${data.total_history_items} total, showing first 50):
+BROWSER HISTORY URLs (${data.total_history_items} total, showing first ${
+		historyUrls.length
+	}):
 ${historyUrls.join("\n")}
 
-CURRENT TABS URLs (${data.total_open_tabs} total):
+CURRENT TABS URLs (${data.total_open_tabs} total, showing first ${
+		tabUrls.length
+	}):
 ${tabUrls.join("\n")}
 
-Focus on creating meaningful categories that reflect the user's interests and browsing patterns. Consider:
+Create 3-7 meaningful categories. For each category, include only 2-5 representative URLs (not all URLs).
+Focus on:
 - Website domains and purposes
 - Content themes and topics
-- User behavior patterns
-- Frequency of visits`;
+- User behavior patterns`;
 }
 
 // Define JSON schema for structured output
 function getCategoriesSchema() {
 	return {
-		name: "browsing_categories",
-		description: "Categories of URLs from browser history and tabs",
-		schema: {
-			type: "object",
-			properties: {
-				categories: {
-					type: "array",
-					description: "Array of categorized URLs",
-					items: {
-						type: "object",
-						properties: {
-							category_name: {
-								type: "string",
-								description: "Name of the category",
-							},
-							description: {
-								type: "string",
-								description: "Description of what this category represents",
-							},
-							urls: {
-								type: "array",
-								description: "Relevant URLs from the data",
-								items: {
+		type: "json_schema",
+		json_schema: {
+			name: "browsing_categories",
+			description:
+				"Categories of URLs from browser history and tabs (3-7 categories, 2-5 URLs each)",
+			schema: {
+				type: "object",
+				properties: {
+					categories: {
+						type: "array",
+						description:
+							"Array of 3-7 categorized URL groups with 2-5 representative URLs each",
+						items: {
+							type: "object",
+							properties: {
+								category_name: {
 									type: "string",
+									description: "Name of the category",
+								},
+								description: {
+									type: "string",
+									description:
+										"Brief description of what this category represents",
+								},
+								urls: {
+									type: "array",
+									description:
+										"2-5 representative URLs from the data for this category",
+									items: {
+										type: "string",
+									},
+								},
+								confidence: {
+									type: "number",
+									description: "Confidence score between 0 and 1",
+								},
+								keywords: {
+									type: "array",
+									description: "2-5 keywords that define this category",
+									items: {
+										type: "string",
+									},
 								},
 							},
-							confidence: {
-								type: "number",
-								description: "Confidence score between 0 and 1",
-								minimum: 0,
-								maximum: 1,
-							},
-							keywords: {
-								type: "array",
-								description: "Keywords that define this category",
-								items: {
-									type: "string",
-								},
-							},
+							required: [
+								"category_name",
+								"description",
+								"urls",
+								"confidence",
+								"keywords",
+							],
+							additionalProperties: false,
 						},
-						required: [
-							"category_name",
-							"description",
-							"urls",
-							"confidence",
-							"keywords",
-						],
 					},
 				},
+				required: ["categories"],
+				additionalProperties: false,
 			},
-			required: ["categories"],
+			strict: true,
 		},
-		strict: true,
 	};
 }
 
@@ -351,20 +380,17 @@ async function callBasetenAPI(data) {
 					{
 						role: "system",
 						content:
-							"You are an expert at analyzing browsing patterns and categorizing URLs. Extract meaningful categories from browser history and tabs.",
+							"You are an expert at analyzing browsing patterns and categorizing URLs. Extract meaningful categories from browser history and tabs. Return JSON with a 'categories' array containing objects with category_name, description, urls (2-5 URLs), confidence (0-1), and keywords (2-5 keywords).",
 					},
 					{
 						role: "user",
 						content: prompt,
 					},
 				],
-				response_format: {
-					type: "json_object",
-					json_schema: getCategoriesSchema(),
-				},
+				response_format: getCategoriesSchema(),
 				stream: false,
 				top_p: 1,
-				max_tokens: 4000,
+				max_tokens: 8000,
 				temperature: 1,
 				presence_penalty: 0,
 				frequency_penalty: 0,
@@ -372,7 +398,13 @@ async function callBasetenAPI(data) {
 		});
 
 		if (!response.ok) {
-			const errorData = await response.json();
+			const errorText = await response.text();
+			let errorData;
+			try {
+				errorData = JSON.parse(errorText);
+			} catch {
+				errorData = { error: { message: errorText } };
+			}
 			throw new Error(
 				`Baseten API error: ${response.status} - ${
 					errorData.error?.message || "Unknown error"
@@ -380,49 +412,120 @@ async function callBasetenAPI(data) {
 			);
 		}
 
-		const result = await response.json();
+		const responseText = await response.text();
+		console.log("Raw API response:", responseText.substring(0, 500)); // Log first 500 chars
+
+		let result;
+		try {
+			result = JSON.parse(responseText);
+		} catch (parseError) {
+			console.error("Failed to parse API response:", parseError);
+			console.error("Response text:", responseText);
+			throw new Error(`Invalid JSON response from API: ${parseError.message}`);
+		}
+
+		if (!result.choices || !result.choices[0] || !result.choices[0].message) {
+			throw new Error("Invalid API response structure");
+		}
+
+		// Check if response was truncated due to token limit
+		if (result.choices[0].finish_reason === "length") {
+			console.warn("API response was truncated due to token limit");
+			throw new Error(
+				"Response was truncated. Try reducing the amount of data or increasing max_tokens."
+			);
+		}
+
 		const content = result.choices[0].message.content;
+		console.log("Content from API:", content.substring(0, 500)); // Log first 500 chars
 
 		// Parse the structured JSON response
-		const parsedContent = JSON.parse(content);
+		let parsedContent;
+		try {
+			parsedContent = JSON.parse(content);
+		} catch (parseError) {
+			console.error("Failed to parse content JSON:", parseError);
+			console.error("Content:", content);
+			throw new Error(`Invalid JSON in content field: ${parseError.message}`);
+		}
+
+		console.log("Parsed content:", parsedContent);
 
 		// Extract the categories - handle both array and object formats
 		let categories = parsedContent.categories || [];
 
-		// If categories is an object (not array), convert it to array format
+		// If no categories array, check if the entire object is the categories
 		if (
-			categories &&
-			typeof categories === "object" &&
-			!Array.isArray(categories)
+			categories.length === 0 &&
+			parsedContent &&
+			typeof parsedContent === "object"
 		) {
-			categories = Object.entries(categories).map(([key, value]) => {
-				// Handle different value formats
-				let urls = [];
-				let description = "";
-				let confidence = 0.9;
-				let keywords = [key.replace(/_/g, " ").toLowerCase()];
-
-				if (Array.isArray(value)) {
-					// Value is directly an array of URLs
-					urls = value;
-					description = `Category: ${key.replace(/_/g, " ")}`;
-				} else if (typeof value === "object") {
-					// Value is an object with properties
-					description =
-						value.description || `Category: ${key.replace(/_/g, " ")}`;
-					urls = value.example_urls || value.urls || [];
-					confidence = value.confidence || 0.9;
-					keywords = value.keywords || keywords;
+			// Check if parsedContent itself contains category-like objects
+			const potentialCategories = Object.entries(parsedContent).filter(
+				([key, value]) => {
+					return (
+						key !== "categories" &&
+						typeof value === "object" &&
+						(value.description || value.representative_urls || value.urls)
+					);
 				}
+			);
 
-				return {
-					category_name: key.replace(/_/g, " "), // Convert underscores to spaces
-					description,
-					urls,
-					confidence,
-					keywords,
-				};
-			});
+			if (potentialCategories.length > 0) {
+				console.log(
+					"Converting object format to categories array:",
+					potentialCategories.length,
+					"categories found"
+				);
+				categories = potentialCategories;
+			}
+		}
+
+		// Convert categories to array format if needed
+		if (Array.isArray(categories) && categories.length > 0) {
+			// Check if it's already in the right format or needs conversion
+			const firstItem = categories[0];
+			if (Array.isArray(firstItem)) {
+				// It's an array of [key, value] pairs from Object.entries
+				categories = categories.map(([key, value]) => {
+					let urls = [];
+					let description = "";
+					let confidence = 0.9;
+					let keywords = [key.replace(/_/g, " ").toLowerCase()];
+
+					if (Array.isArray(value)) {
+						urls = value;
+						description = `Category: ${key.replace(/_/g, " ")}`;
+					} else if (typeof value === "object") {
+						description =
+							value.description || `Category: ${key.replace(/_/g, " ")}`;
+						urls =
+							value.representative_urls ||
+							value.example_urls ||
+							value.urls ||
+							[];
+						confidence = value.confidence || 0.9;
+						keywords = value.keywords || keywords;
+					}
+
+					return {
+						category_name: key.replace(/_/g, " "),
+						description,
+						urls,
+						confidence,
+						keywords,
+					};
+				});
+			}
+			// else: already in correct format
+		}
+
+		console.log("Final categories:", categories);
+
+		if (!categories || categories.length === 0) {
+			throw new Error(
+				"No categories generated. API response structure may be unexpected."
+			);
 		}
 
 		return categories;
