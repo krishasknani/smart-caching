@@ -5,7 +5,7 @@
         <style>
     body {
       width: 400px;
-      min-height: 300px;
+      min-height: 200px;
       margin: 0;
       padding: 16px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -118,6 +118,104 @@
       font-style: italic;
       padding: 20px;
     }
+    
+    
+    .analyze-button {
+      width: 100%;
+      padding: 12px;
+      background-color: #9c27b0;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      margin-bottom: 20px;
+    }
+    
+    .analyze-button:hover {
+      background-color: #7b1fa2;
+    }
+    
+    .analyze-button:disabled {
+      background-color: #ccc;
+      cursor: not-allowed;
+    }
+    
+    .categories {
+      border-top: 1px solid #e0e0e0;
+      padding-top: 16px;
+      margin-top: 16px;
+    }
+    
+    .categories h3 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+      color: #333;
+    }
+    
+    .category-item {
+      padding: 12px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      background-color: #f9f9f9;
+    }
+    
+    .category-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    
+    .category-name {
+      font-weight: 600;
+      color: #333;
+      font-size: 14px;
+    }
+    
+    .category-confidence {
+      background-color: #4285f4;
+      color: white;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+    
+    .category-description {
+      color: #666;
+      font-size: 12px;
+      margin-bottom: 8px;
+      line-height: 1.4;
+    }
+    
+    .category-keywords {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-bottom: 8px;
+    }
+    
+    .keyword-tag {
+      background-color: #e3f2fd;
+      color: #1976d2;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 10px;
+    }
+    
+    .category-urls {
+      font-size: 11px;
+      color: #888;
+    }
+    
+    .loading-state {
+      text-align: center;
+      color: #666;
+      font-style: italic;
+      padding: 20px;
+    }
   </style>
     </head>
     <body>
@@ -129,10 +227,22 @@
             Cache This Page
         </button>
 
+        <button id="analyzeButton" class="analyze-button">
+            🧠 Analyze Browsing Patterns
+        </button>
+
         <div class="cached-pages">
             <h3>Cached Pages</h3>
             <div id="cachedPagesList">
                 <div class="empty-state">No pages cached yet</div>
+            </div>
+        </div>
+
+
+        <div class="categories">
+            <h3>Browsing Categories</h3>
+            <div id="categoriesList">
+                <div class="empty-state">Click "Analyze Browsing Patterns" to see your categories</div>
             </div>
         </div>
 

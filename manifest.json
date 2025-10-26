@@ -3,7 +3,7 @@
 	"name": "Smart Caching Extension",
 	"version": "1.0.0",
 	"description": "Cache web pages for offline viewing",
-	"permissions": ["storage", "tabs", "activeTab", "scripting"],
+	"permissions": ["storage", "tabs", "activeTab", "scripting", "history"],
 	"action": {
 		"default_popup": "popup.html",
 		"default_title": "Smart Caching",
@@ -16,6 +16,12 @@
 	"background": {
 		"service_worker": "background.js"
 	},
+	"web_accessible_resources": [
+		{
+			"resources": ["config.js"],
+			"matches": ["<all_urls>"]
+		}
+	],
 	"content_scripts": [
 		{
 			"matches": ["<all_urls>"],

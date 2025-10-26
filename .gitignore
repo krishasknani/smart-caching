@@ -3,6 +3,9 @@
 *.pem
 *.zip
 
+# Configuration files with sensitive data
+config.js
+
 # Node modules (if you add any build tools later)
 node_modules/
 npm-debug.log*
