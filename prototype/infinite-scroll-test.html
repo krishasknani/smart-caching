@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Infinite Scroll Test</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f0f0f0;
+    }
+    .item {
+      background: white;
+      margin: 10px 0;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    #loading {
+      text-align: center;
+      padding: 20px;
+      font-style: italic;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+  <h1>Infinite Scroll Test Page</h1>
+  <div id="content">
+    <div class="item">Initial Item 1</div>
+    <div class="item">Initial Item 2</div>
+    <div class="item">Initial Item 3</div>
+  </div>
+  <div id="loading" style="display: none;">Loading more items...</div>
+
+  <script>
+    let itemCount = 3;
+    let isLoading = false;
+
+    function loadMoreItems() {
+      if (isLoading) return;
+      
+      isLoading = true;
+      document.getElementById('loading').style.display = 'block';
+      
+      // Simulate network delay
+      setTimeout(() => {
+        const content = document.getElementById('content');
+        for (let i = 0; i < 5; i++) {
+          itemCount++;
+          const item = document.createElement('div');
+          item.className = 'item';
+          item.innerHTML = `<h3>Lazy Loaded Item ${itemCount}</h3><p>This item was loaded when you scrolled down. Item number: ${itemCount}</p>`;
+          content.appendChild(item);
+        }
+        
+        document.getElementById('loading').style.display = 'none';
+        isLoading = false;
+      }, 500);
+    }
+
+    // Infinite scroll detection
+    window.addEventListener('scroll', () => {
+      const scrollHeight = document.documentElement.scrollHeight;
+      const scrollTop = document.documentElement.scrollTop;
+      const clientHeight = document.documentElement.clientHeight;
+      
+      // Load more when user is 200px from bottom
+      if (scrollTop + clientHeight >= scrollHeight - 200) {
+        loadMoreItems();
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dynamic Website Caching - Test Page</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto",
+          sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+      }
+
+      .container {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        padding: 40px;
+        max-width: 800px;
+        width: 100%;
+      }
+
+      h1 {
+        color: #333;
+        margin-bottom: 10px;
+        font-size: 28px;
+      }
+
+      .subtitle {
+        color: #666;
+        margin-bottom: 30px;
+        font-size: 14px;
+      }
+
+      .input-group {
+        margin-bottom: 20px;
+      }
+
+      label {
+        display: block;
+        color: #555;
+        font-weight: 600;
+        margin-bottom: 8px;
+        font-size: 14px;
+      }
+
+      input[type="text"],
+      input[type="number"] {
+        width: 100%;
+        padding: 12px 16px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 16px;
+        transition: border-color 0.3s;
+      }
+
+      input[type="text"]:focus,
+      input[type="number"]:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .button-group {
+        display: flex;
+        gap: 12px;
+        margin-top: 25px;
+      }
+
+      button {
+        flex: 1;
+        padding: 14px 24px;
+        border: none;
+        border-radius: 8px;
+        font-size: 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+
+      .btn-primary:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+      }
+
+      .btn-secondary {
+        background: #f0f0f0;
+        color: #333;
+      }
+
+      .btn-secondary:hover:not(:disabled) {
+        background: #e0e0e0;
+      }
+
+      .status-box {
+        margin-top: 25px;
+        padding: 16px;
+        border-radius: 8px;
+        font-size: 14px;
+        display: none;
+      }
+
+      .status-box.visible {
+        display: block;
+      }
+
+      .status-box.loading {
+        background: #fff3cd;
+        color: #856404;
+        border: 1px solid #ffeaa7;
+      }
+
+      .status-box.success {
+        background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+      }
+
+      .status-box.error {
+        background: #f8d7da;
+        color: #721c24;
+        border: 1px solid #f5c6cb;
+      }
+
+      .status-box.info {
+        background: #d1ecf1;
+        color: #0c5460;
+        border: 1px solid #bee5eb;
+      }
+
+      .status-icon {
+        display: inline-block;
+        margin-right: 8px;
+        font-size: 18px;
+      }
+
+      .stats {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(0, 0, 0, 0.1);
+        font-size: 13px;
+      }
+
+      .stats-item {
+        display: inline-block;
+        margin-right: 20px;
+        margin-top: 5px;
+      }
+
+      .stats-item strong {
+        color: #333;
+      }
+
+      .instructions {
+        margin-top: 30px;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 8px;
+        border-left: 4px solid #667eea;
+      }
+
+      .instructions h3 {
+        color: #333;
+        font-size: 16px;
+        margin-bottom: 12px;
+      }
+
+      .instructions ol {
+        margin-left: 20px;
+        color: #555;
+        line-height: 1.8;
+      }
+
+      .instructions li {
+        margin-bottom: 8px;
+      }
+
+      .instructions code {
+        background: #e9ecef;
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-family: "Courier New", monospace;
+        font-size: 13px;
+      }
+
+      .advanced-options {
+        margin-top: 20px;
+        padding: 16px;
+        background: #f8f9fa;
+        border-radius: 8px;
+      }
+
+      .advanced-options h4 {
+        font-size: 14px;
+        color: #555;
+        margin-bottom: 12px;
+      }
+
+      .spinner {
+        display: inline-block;
+        width: 16px;
+        height: 16px;
+        border: 3px solid rgba(0, 0, 0, 0.1);
+        border-top-color: #856404;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-right: 8px;
+        vertical-align: middle;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🚀 Dynamic Website Caching</h1>
+      <p class="subtitle">
+        Cache JavaScript-rendered websites for offline viewing
+      </p>
+
+      <div class="input-group">
+        <label for="url">Website URL</label>
+        <input
+          type="text"
+          id="url"
+          placeholder="https://example.com"
+          value="https://example.com"
+        />
+      </div>
+
+      <div class="advanced-options">
+        <h4>⚙️ Advanced Options</h4>
+        <div class="input-group">
+          <label for="maxDepth">Max Link Depth (0-5)</label>
+          <input
+            type="number"
+            id="maxDepth"
+            min="0"
+            max="5"
+            value="0"
+            placeholder="0"
+          />
+          <small
+            style="
+              color: #666;
+              font-size: 12px;
+              margin-top: 4px;
+              display: block;
+            "
+          >
+            How many levels of linked pages to cache (0 = current page only)
+          </small>
+        </div>
+      </div>
+
+      <div class="button-group">
+        <button class="btn-primary" id="cacheBtn" onclick="cachePage()">
+          📦 Cache This Site
+        </button>
+        <button
+          class="btn-secondary"
+          id="viewBtn"
+          onclick="viewCached()"
+          disabled
+        >
+          👁️ View Cached
+        </button>
+        <button class="btn-secondary" id="checkBtn" onclick="checkCache()">
+          🔍 Check Cache
+        </button>
+      </div>
+
+      <div id="status" class="status-box"></div>
+
+      <div class="instructions">
+        <h3>📋 How to Use</h3>
+        <ol>
+          <li>
+            Enter a website URL (e.g.,
+            <code>https://news.ycombinator.com</code>)
+          </li>
+          <li>
+            Click <strong>"Cache This Site"</strong> to download and save it
+          </li>
+          <li>
+            Wait for the caching process to complete (may take 10-60 seconds)
+          </li>
+          <li>
+            Click <strong>"View Cached"</strong> to open the offline version
+          </li>
+          <li>Turn off your WiFi and try viewing again - it still works!</li>
+        </ol>
+      </div>
+    </div>
+
+    <script>
+      let currentCacheHash = null;
+
+      // Show status message
+      function showStatus(message, type, stats = null) {
+        const statusBox = document.getElementById("status");
+        const icons = {
+          loading: "⏳",
+          success: "✅",
+          error: "❌",
+          info: "ℹ️",
+        };
+
+        let html = `<span class="status-icon">${icons[type]}</span>${message}`;
+
+        if (stats) {
+          html += `
+          <div class="stats">
+            ${
+              stats.pages
+                ? `<div class="stats-item"><strong>Pages:</strong> ${stats.pages}</div>`
+                : ""
+            }
+            ${
+              stats.assets
+                ? `<div class="stats-item"><strong>Assets:</strong> ${stats.assets}</div>`
+                : ""
+            }
+            ${
+              stats.cached_at
+                ? `<div class="stats-item"><strong>Cached:</strong> ${new Date(
+                    stats.cached_at
+                  ).toLocaleString()}</div>`
+                : ""
+            }
+          </div>
+        `;
+        }
+
+        statusBox.innerHTML = html;
+        statusBox.className = `status-box visible ${type}`;
+      }
+
+      // Cache a page
+      async function cachePage() {
+        const urlInput = document.getElementById("url");
+        const url = urlInput.value.trim();
+        const maxDepth =
+          parseInt(document.getElementById("maxDepth").value) || 0;
+
+        if (!url) {
+          showStatus("Please enter a URL", "error");
+          return;
+        }
+
+        // Validate URL
+        try {
+          new URL(url);
+        } catch (e) {
+          showStatus(
+            "Please enter a valid URL (including http:// or https://)",
+            "error"
+          );
+          return;
+        }
+
+        const cacheBtn = document.getElementById("cacheBtn");
+        const viewBtn = document.getElementById("viewBtn");
+
+        cacheBtn.disabled = true;
+        viewBtn.disabled = true;
+
+        showStatus(
+          `<span class="spinner"></span>Caching website... This may take a minute. Please wait.`,
+          "loading"
+        );
+
+        try {
+          const response = await fetch("/api/cache", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ url, maxDepth }),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            currentCacheHash = result.cacheHash;
+            showStatus(
+              `Successfully cached! You can now view it offline.`,
+              "success",
+              result.stats
+            );
+            viewBtn.disabled = false;
+          } else {
+            showStatus(`Error: ${result.error}`, "error");
+          }
+        } catch (error) {
+          showStatus(`Network error: ${error.message}`, "error");
+        } finally {
+          cacheBtn.disabled = false;
+        }
+      }
+
+      // View cached page
+      function viewCached() {
+        if (!currentCacheHash) {
+          showStatus("No cached page available. Cache a page first.", "error");
+          return;
+        }
+
+        window.open(`/cached/${currentCacheHash}/index.html`, "_blank");
+        showStatus("Opened cached page in new window", "info");
+      }
+
+      // Check if page is cached
+      async function checkCache() {
+        const urlInput = document.getElementById("url");
+        const url = urlInput.value.trim();
+
+        if (!url) {
+          showStatus("Please enter a URL to check", "error");
+          return;
+        }
+
+        showStatus('<span class="spinner"></span>Checking cache...', "loading");
+
+        try {
+          const encodedUrl = encodeURIComponent(url);
+          const response = await fetch(`/api/check/${encodedUrl}`);
+          const result = await response.json();
+
+          if (result.cached) {
+            currentCacheHash = result.cacheHash;
+            const viewBtn = document.getElementById("viewBtn");
+            viewBtn.disabled = false;
+
+            showStatus(
+              'This page is cached! Click "View Cached" to open it.',
+              "success",
+              {
+                pages: result.manifest.pages.length,
+                assets: result.manifest.assets.length,
+                cached_at: result.manifest.cached_at,
+              }
+            );
+          } else {
+            showStatus(
+              'This page is not cached yet. Click "Cache This Site" to cache it.',
+              "info"
+            );
+          }
+        } catch (error) {
+          showStatus(`Error checking cache: ${error.message}`, "error");
+        }
+      }
+
+      // Handle Enter key in URL input
+      document.getElementById("url").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+          cachePage();
+        }
+      });
+
+      // Auto-check on page load
+      window.addEventListener("load", () => {
+        console.log("🚀 Test page loaded");
+      });
+    </script>
+  </body>
+</html>
