@@ -19,15 +19,17 @@ document.addEventListener("DOMContentLoaded", function () {
 		cacheCurrentPage();
 	});
 
-	// Analyze button click handler
-	analyzeButton.addEventListener("click", function () {
-		analyzeBrowsingPatterns();
-	});
+	// Analyze button removed: keep guard if present (backward-compatible)
+	if (analyzeButton) {
+		analyzeButton.addEventListener("click", function () {
+			analyzeBrowsingPatterns();
+		});
+	}
 
 	// Smart cache button click handler
 	if (smartCacheButton) {
 		smartCacheButton.addEventListener("click", function () {
-			runSmartCachingFromCategories();
+			runAnalyzeAndSmartCache();
 		});
 	}
 
@@ -186,7 +188,63 @@ document.addEventListener("DOMContentLoaded", function () {
 		} finally {
 			if (smartCacheButton) {
 				smartCacheButton.disabled = false;
-				smartCacheButton.textContent = "🔎 Smart Cache from Categories";
+				smartCacheButton.textContent = "🧠 Analyze + 🔎 Smart Cache";
+			}
+		}
+	}
+
+	// New: single-button pipeline to analyze and then smart cache
+	async function runAnalyzeAndSmartCache() {
+		try {
+			if (smartCacheButton) {
+				smartCacheButton.disabled = true;
+				smartCacheButton.textContent = "Analyzing + caching…";
+			}
+
+			// Ensure config loaded
+			if (!CONFIG) await loadConfig();
+			const apiKey = (CONFIG?.BRAVE_API_KEY || "").trim();
+			if (!apiKey) {
+				alert("Missing Brave API key. Please set BRAVE_API_KEY in config.js.");
+				return;
+			}
+
+			// Always run fresh analysis
+			const categories = await analyzeBrowsingPatterns();
+			if (!Array.isArray(categories) || categories.length === 0) {
+				alert("No categories produced from analysis.");
+				return;
+			}
+
+			const queries = generateQueriesFromCategories(categories, 10);
+			if (queries.length === 0) {
+				alert("No queries could be generated from categories.");
+				return;
+			}
+
+			const resultsPerQuery = CONFIG?.BRAVE_RESULTS_PER_QUERY || 5;
+			const response = await chrome.runtime.sendMessage({
+				action: "runSmartCaching",
+				apiKey,
+				queries,
+				resultsPerQuery,
+			});
+
+			if (response?.ok) {
+				await loadCachedPages();
+				alert(
+					`Smart caching complete. Cached ${response.scraped} pages from ${response.totalCandidates} candidates.`
+				);
+			} else {
+				throw new Error(response?.error || "Unknown error");
+			}
+		} catch (err) {
+			console.error("Analyze + Smart cache error:", err);
+			alert(`Smart caching failed: ${String(err?.message || err)}`);
+		} finally {
+			if (smartCacheButton) {
+				smartCacheButton.disabled = false;
+				smartCacheButton.textContent = "🧠 Analyze + 🔎 Smart Cache";
 			}
 		}
 	}
@@ -500,9 +558,11 @@ document.addEventListener("DOMContentLoaded", function () {
 	// Analyze browsing patterns with Claude
 	async function analyzeBrowsingPatterns() {
 		try {
-			// Show loading state
-			analyzeButton.disabled = true;
-			analyzeButton.textContent = "🧠 Analyzing...";
+			// Show loading state (guard if analyzeButton no longer exists)
+			if (analyzeButton) {
+				analyzeButton.disabled = true;
+				analyzeButton.textContent = "🧠 Analyzing...";
+			}
 			categoriesList.innerHTML =
 				'<div class="loading-state">Analyzing your browsing patterns with Claude AI...</div>';
 
@@ -521,7 +581,8 @@ document.addEventListener("DOMContentLoaded", function () {
 			if (response.success) {
 				// Display the categories
 				displayCategories(response.data);
-				alert("Analysis complete! Check the Browsing Categories section.");
+				// Return categories for chaining
+				return response.data;
 			} else {
 				throw new Error(response.error || "Analysis failed");
 			}
@@ -529,10 +590,13 @@ document.addEventListener("DOMContentLoaded", function () {
 			console.error("Error analyzing browsing patterns:", error);
 			categoriesList.innerHTML = `<div class="empty-state">Error: ${error.message}</div>`;
 			alert(`Analysis failed: ${error.message}`);
+			return [];
 		} finally {
 			// Reset button state
-			analyzeButton.disabled = false;
-			analyzeButton.textContent = "🧠 Analyze Browsing Patterns";
+			if (analyzeButton) {
+				analyzeButton.disabled = false;
+				analyzeButton.textContent = "🧠 Analyze Browsing Patterns";
+			}
 		}
 	}
 
@@ -632,7 +696,7 @@ document.addEventListener("DOMContentLoaded", function () {
 					);
 				} else {
 					categoriesList.innerHTML =
-						'<div class="empty-state">Previous analysis is outdated. Click "Analyze Browsing Patterns" for fresh results.</div>';
+						'<div class="empty-state">Previous analysis is outdated. Click "Analyze + Smart Cache" for fresh results.</div>';
 				}
 			}
 		} catch (error) {
