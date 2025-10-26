@@ -21,12 +21,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Listen for browser history changes to trigger auto-caching
 chrome.history.onVisited.addListener(async (historyItem) => {
 	try {
-		// Skip if this is a tab we created for content extraction
-		if (isExtractionTab(historyItem.url)) {
-			console.log("Skipping extraction tab:", historyItem.url);
-			return;
-		}
-
 		// Check if first analysis has been completed
 		const isFirstTime = await isFirstTimeAnalysis();
 		if (isFirstTime) {
@@ -542,32 +536,6 @@ async function scrapePage(url) {
 	});
 }
 
-function waitForTabComplete(tabId, timeoutMs = 20000) {
-	return new Promise((resolve, reject) => {
-		let done = false;
-		const timer = setTimeout(() => {
-			if (done) return;
-			done = true;
-			cleanup();
-			reject(new Error("Tab load timeout"));
-		}, timeoutMs);
-
-		function onUpdated(updatedId, changeInfo) {
-			if (updatedId === tabId && changeInfo.status === "complete") {
-				if (done) return;
-				done = true;
-				cleanup();
-				resolve();
-			}
-		}
-		function cleanup() {
-			clearTimeout(timer);
-			chrome.tabs.onUpdated.removeListener(onUpdated);
-		}
-		chrome.tabs.onUpdated.addListener(onUpdated);
-	});
-}
-
 function extractTitleFromHtml(html) {
 	if (!html) return null;
 	const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
@@ -811,66 +779,6 @@ async function generateQueriesFromUrl(url) {
 	}
 }
 
-// Generate smart queries based on URL analysis
-function generateSmartQueriesFromUrl(url) {
-	try {
-		const urlObj = new URL(url);
-		const domain = urlObj.hostname;
-		const path = urlObj.pathname;
-		const queries = [];
-		
-		// Domain-based queries
-		if (domain.includes('github.com')) {
-			queries.push('github repositories programming');
-			queries.push('open source projects');
-		} else if (domain.includes('stackoverflow.com')) {
-			queries.push('programming questions answers');
-			queries.push('coding help');
-		} else if (domain.includes('youtube.com')) {
-			queries.push('video tutorials');
-			queries.push('educational content');
-		} else if (domain.includes('medium.com')) {
-			queries.push('articles blog posts');
-			queries.push('tech writing');
-		} else if (domain.includes('reddit.com')) {
-			queries.push('community discussions');
-			queries.push('user experiences');
-		} else if (domain.includes('wikipedia.org')) {
-			queries.push('encyclopedia information');
-			queries.push('reference material');
-		} else if (domain.includes('hellointerview.com')) {
-			queries.push('interview preparation');
-			queries.push('coding practice');
-		} else {
-			// Generic domain-based query
-			queries.push(domain);
-		}
-		
-		// Path-based queries
-		if (path && path !== '/' && path.length > 1) {
-			const pathParts = path.split('/').filter(part => part.length > 2);
-			if (pathParts.length > 0) {
-				const pathQuery = pathParts.join(' ');
-				queries.push(pathQuery);
-			}
-		}
-		
-		// Add general topic queries based on common patterns
-		if (path.includes('tutorial') || path.includes('guide')) {
-			queries.push('tutorials guides');
-		} else if (path.includes('api') || path.includes('documentation')) {
-			queries.push('API documentation');
-		} else if (path.includes('blog') || path.includes('article')) {
-			queries.push('blog articles');
-		}
-		
-		return [...new Set(queries)].filter(q => q.trim().length > 0);
-	} catch (error) {
-		console.error("Error generating smart queries from URL:", error);
-		return [];
-	}
-}
-
 // Get content from existing tab if user is still on the page
 async function getContentFromExistingTab(url) {
 	try {
@@ -919,40 +827,6 @@ async function fetchPageContent(url) {
 		console.log("Background fetch failed:", error.message);
 		return null;
 	}
-}
-
-// Wait for tab to load completely
-async function waitForTabLoad(tabId, timeoutMs = 10000) {
-	return new Promise((resolve, reject) => {
-		let done = false;
-		const timer = setTimeout(() => {
-			if (done) return;
-			done = true;
-			cleanup();
-			reject(new Error("Tab load timeout"));
-		}, timeoutMs);
-
-		function onUpdated(updatedId, changeInfo) {
-			if (updatedId === tabId && changeInfo.status === "complete") {
-				if (done) return;
-				done = true;
-				cleanup();
-				resolve();
-			}
-		}
-		function cleanup() {
-			clearTimeout(timer);
-			chrome.tabs.onUpdated.removeListener(onUpdated);
-		}
-		chrome.tabs.onUpdated.addListener(onUpdated);
-	});
-}
-
-// Check if URL is from an extraction tab we created
-function isExtractionTab(url) {
-	// For now, we'll use a different approach - don't create tabs at all
-	// Instead, we'll use a simpler method that doesn't trigger history events
-	return false;
 }
 
 // Call Claude API for single URL analysis

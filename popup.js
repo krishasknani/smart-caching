@@ -219,74 +219,7 @@ document.addEventListener("DOMContentLoaded", function () {
 			.slice(0, maxQueries);
 	}
 
-	async function runSmartCachingFromCategories() {
-		try {
-			if (!smartCacheButton) return;
-			smartCacheButton.disabled = true;
-			smartCacheButton.textContent = "Caching from categories…";
-
-			// Ensure config loaded
-			if (!CONFIG) await loadConfig();
-			const token = (CONFIG?.BRIGHTDATA_TOKEN || "").trim();
-			const zone = (CONFIG?.BRIGHTDATA_ZONE || "").trim();
-			if (!token || !zone) {
-				alert(
-					"Missing Bright Data credentials. Please set BRIGHTDATA_TOKEN and BRIGHTDATA_ZONE in config.js."
-				);
-				return;
-			}
-
-			// Get categories from storage; if missing, run analysis first
-			let { claudeCategories } = await chrome.storage.local.get([
-				"claudeCategories",
-			]);
-			if (!Array.isArray(claudeCategories) || claudeCategories.length === 0) {
-				await analyzeBrowsingPatterns();
-				({ claudeCategories } = await chrome.storage.local.get([
-					"claudeCategories",
-				]));
-			}
-			if (!Array.isArray(claudeCategories) || claudeCategories.length === 0) {
-				alert(
-					"No categories available to generate queries. Try again after analysis."
-				);
-				return;
-			}
-
-			const queries = generateQueriesFromCategories(claudeCategories, 10);
-			if (queries.length === 0) {
-				alert("No queries could be generated from categories.");
-				return;
-			}
-
-			const resultsPerQuery = CONFIG?.SERP_RESULTS_PER_QUERY || 5;
-			const response = await chrome.runtime.sendMessage({
-				action: "runSmartCaching",
-				token,
-				zone,
-				queries,
-				resultsPerQuery,
-			});
-			if (response?.ok) {
-				await loadCachedPages();
-				alert(
-					`Smart caching complete. Cached ${response.scraped} pages from ${response.totalCandidates} candidates.`
-				);
-			} else {
-				throw new Error(response?.error || "Unknown error");
-			}
-		} catch (err) {
-			console.error("Smart caching error:", err);
-			alert(`Smart caching failed: ${String(err?.message || err)}`);
-		} finally {
-			if (smartCacheButton) {
-				smartCacheButton.disabled = false;
-				smartCacheButton.textContent = "🧠 Analyze + 🔎 Smart Cache";
-			}
-		}
-	}
-
-	// New: single-button pipeline to analyze and then smart cache
+	// Single-button pipeline to analyze and then smart cache
 	async function runAnalyzeAndSmartCache() {
 		try {
 			if (smartCacheButton) {
