@@ -18,6 +18,42 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 	}
 });
 
+// Listen for browser history changes to trigger auto-caching
+chrome.history.onVisited.addListener(async (historyItem) => {
+	try {
+		// Skip if this is a tab we created for content extraction
+		if (isExtractionTab(historyItem.url)) {
+			console.log("Skipping extraction tab:", historyItem.url);
+			return;
+		}
+
+		// Check if first analysis has been completed
+		const isFirstTime = await isFirstTimeAnalysis();
+		if (isFirstTime) {
+			console.log("First analysis not complete, skipping auto-cache for:", historyItem.url);
+			return;
+		}
+
+		// Check if auto-caching is enabled
+		const autoCacheEnabled = await isAutoCachingEnabled();
+		if (!autoCacheEnabled) {
+			console.log("Auto-caching disabled, skipping:", historyItem.url);
+			return;
+		}
+
+		// Check if URL was recently analyzed
+		if (await isRecentlyAnalyzed(historyItem.url)) {
+			console.log("URL recently analyzed, skipping:", historyItem.url);
+			return;
+		}
+
+		// Trigger auto-caching for this URL
+		await autoAnalyzeAndCache(historyItem.url);
+	} catch (error) {
+		console.error("Error in history listener:", error);
+	}
+});
+
 // ===== CLAUDE API INTEGRATION =====
 
 // Load configuration
@@ -152,14 +188,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 				let queries = Array.isArray(request.queries)
 					? request.queries.filter((q) => q && q.trim())
 					: [];
-				// Deduplicate and normalize queries to reduce API calls
-				queries = [
-					...new Set(
-						queries.map((q) => q.replace(/\s+/g, " ").trim().toLowerCase())
-					),
-				];
-				// Safety cap in case caller sends too many
-				queries = queries.slice(0, 10);
 				const resultsPerQuery = clampInt(
 					request.resultsPerQuery ?? CONFIG.SERP_RESULTS_PER_QUERY,
 					1,
@@ -167,55 +195,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 					5
 				);
 
-				if (!token) throw new Error("Missing Bright Data token");
-				if (!zone) throw new Error("Missing Bright Data zone");
-				if (queries.length === 0) throw new Error("No queries provided");
-
-				const allUrls = [];
-				for (const q of queries) {
-					const urls = await brightDataSearch(token, zone, q, resultsPerQuery);
-					allUrls.push(...urls);
-				}
-
-				const candidates = dedupeStrings(
-					allUrls.map(canonicalizeUrl).filter(Boolean)
-				);
-
-				const existing =
-					(await chrome.storage.local.get(["cachedPages"]))?.cachedPages || [];
-				const existingSet = new Set(existing.map((p) => p.url));
-				const toScrape = candidates.filter((u) => !existingSet.has(u));
-
-				const results = [];
-				for (const url of toScrape) {
-					try {
-						const { content, title } = await scrapePage(url);
-						if (!content) throw new Error("Empty content");
-						const pageData = {
-							url,
-							title: title || url,
-							content,
-							timestamp: Date.now(),
-							favicon: "",
-						};
-						await saveCachedPage(pageData);
-						results.push({ url, status: "cached" });
-					} catch (err) {
-						console.warn("Failed to cache", url, err);
-						results.push({
-							url,
-							status: "error",
-							error: String(err?.message || err),
-						});
-					}
-				}
-
-				sendResponse({
-					ok: true,
-					totalCandidates: candidates.length,
-					scraped: results.filter((r) => r.status === "cached").length,
-					results,
-				});
+				const result = await runSmartCaching(token, zone, queries, resultsPerQuery);
+				sendResponse(result);
 			} catch (err) {
 				sendResponse({ ok: false, error: String(err?.message || err) });
 			}
@@ -608,4 +589,510 @@ function clampInt(v, min, max, dflt) {
 	const n = Number.parseInt(v, 10);
 	if (Number.isFinite(n)) return Math.max(min, Math.min(max, n));
 	return dflt;
+}
+
+// Run smart caching: search, scrape, and cache related pages
+async function runSmartCaching(token, zone, queries, resultsPerQuery = 5) {
+	try {
+		// Validate inputs
+		if (!token || token.trim() === "") throw new Error("Missing Bright Data token");
+		if (!zone || zone.trim() === "") throw new Error("Missing Bright Data zone");
+		
+		// Normalize and deduplicate queries
+		let normalizedQueries = Array.isArray(queries)
+			? queries.filter((q) => q && q.trim())
+			: [];
+		normalizedQueries = [
+			...new Set(
+				normalizedQueries.map((q) => q.replace(/\s+/g, " ").trim().toLowerCase())
+			),
+		];
+		// Safety cap in case caller sends too many
+		normalizedQueries = normalizedQueries.slice(0, 10);
+		
+		if (normalizedQueries.length === 0) throw new Error("No queries provided");
+
+		// Search for URLs
+		const allUrls = [];
+		for (const q of normalizedQueries) {
+			const urls = await brightDataSearch(token, zone, q, resultsPerQuery);
+			allUrls.push(...urls);
+		}
+
+		// Canonicalize and deduplicate URLs
+		const candidates = dedupeStrings(
+			allUrls.map(canonicalizeUrl).filter(Boolean)
+		);
+
+		// Filter out already cached pages
+		const existing =
+			(await chrome.storage.local.get(["cachedPages"]))?.cachedPages || [];
+		const existingSet = new Set(existing.map((p) => p.url));
+		const toScrape = candidates.filter((u) => !existingSet.has(u));
+
+		// Scrape and cache each page
+		const results = [];
+		for (const url of toScrape) {
+			try {
+				const { content, title } = await scrapePage(url);
+				if (!content) throw new Error("Empty content");
+				const pageData = {
+					url,
+					title: title || url,
+					content,
+					timestamp: Date.now(),
+					favicon: "",
+				};
+				await saveCachedPage(pageData);
+				results.push({ url, status: "cached" });
+			} catch (err) {
+				console.warn("Failed to cache", url, err);
+				results.push({
+					url,
+					status: "error",
+					error: String(err?.message || err),
+				});
+			}
+		}
+
+		return {
+			ok: true,
+			totalCandidates: candidates.length,
+			scraped: results.filter((r) => r.status === "cached").length,
+			results,
+		};
+	} catch (err) {
+		throw new Error(String(err?.message || err));
+	}
+}
+
+// ===== AUTO-CACHING FUNCTIONS =====
+
+// Check if first-time analysis has been completed
+async function isFirstTimeAnalysis() {
+	try {
+		const result = await chrome.storage.local.get(['firstAnalysisComplete']);
+		return !result.firstAnalysisComplete;
+	} catch (error) {
+		console.error("Error checking first-time analysis status:", error);
+		return true; // Default to first time if error
+	}
+}
+
+// Check if auto-caching is enabled
+async function isAutoCachingEnabled() {
+	try {
+		const result = await chrome.storage.local.get(['autoCachingEnabled']);
+		return result.autoCachingEnabled !== false; // Default to enabled
+	} catch (error) {
+		console.error("Error checking auto-caching status:", error);
+		return true; // Default to enabled
+	}
+}
+
+// Check if URL was recently analyzed
+async function isRecentlyAnalyzed(url) {
+	try {
+		const result = await chrome.storage.local.get(['analyzedUrls']);
+		const analyzedUrls = result.analyzedUrls || {};
+		const lastAnalyzed = analyzedUrls[url];
+		
+		// Don't analyze if analyzed within last 24 hours
+		return lastAnalyzed && (Date.now() - lastAnalyzed) < 24 * 60 * 60 * 1000;
+	} catch (error) {
+		console.error("Error checking if URL was recently analyzed:", error);
+		return false;
+	}
+}
+
+// Mark URL as analyzed
+async function markUrlAsAnalyzed(url) {
+	try {
+		const result = await chrome.storage.local.get(['analyzedUrls']);
+		const analyzedUrls = result.analyzedUrls || {};
+		analyzedUrls[url] = Date.now();
+		await chrome.storage.local.set({ analyzedUrls });
+	} catch (error) {
+		console.error("Error marking URL as analyzed:", error);
+	}
+}
+
+// Auto-analyze and cache a single URL
+async function autoAnalyzeAndCache(url) {
+	try {
+		console.log("Auto-caching URL:", url);
+		
+		// Check if URL is restricted
+		if (isRestrictedUrl(url)) {
+			console.log("Skipping restricted URL:", url);
+			return;
+		}
+
+		// Ensure config is loaded
+		await ensureConfigLoaded();
+		
+		// Generate queries based on URL content
+		const queries = await generateQueriesFromUrl(url);
+		if (queries.length === 0) {
+			console.log("No queries generated for URL:", url);
+			return;
+		}
+
+		// Get Bright Data credentials
+		const token = (CONFIG?.BRIGHTDATA_TOKEN || "").trim();
+		const zone = (CONFIG?.BRIGHTDATA_ZONE || "").trim();
+		if (!token || !zone) {
+			console.log("Missing Bright Data credentials, skipping auto-cache");
+			return;
+		}
+
+		// Run smart caching for this URL
+		const resultsPerQuery = CONFIG?.SERP_RESULTS_PER_QUERY || 3; // Fewer results for auto-caching
+		const response = await runSmartCaching(token, zone, queries, resultsPerQuery);
+		
+		if (response?.ok) {
+			console.log(`Auto-caching complete for ${url}: ${response.scraped} pages cached`);
+			
+			// Show notification
+			await showAutoCacheNotification(url, response.scraped);
+		} else {
+			console.error("Auto-caching failed for URL:", url, response?.error);
+		}
+
+		// Mark URL as analyzed
+		await markUrlAsAnalyzed(url);
+		
+	} catch (error) {
+		console.error("Error in auto-analyze and cache:", error);
+	}
+}
+
+// Generate queries from a single URL using Claude analysis
+async function generateQueriesFromUrl(url) {
+	try {
+		console.log("Generating queries for URL:", url);
+		
+		// Try to get content from existing tab first
+		let pageContent = await getContentFromExistingTab(url);
+		
+		// If no existing tab, try background fetch
+		if (!pageContent) {
+			pageContent = await fetchPageContent(url);
+		}
+		
+		if (!pageContent) {
+			console.log("Could not extract content from URL:", url);
+			return [];
+		}
+
+		// Prepare data for Claude analysis
+		const data = {
+			url: url,
+			title: extractTitleFromHtml(pageContent) || new URL(url).hostname,
+			content: pageContent,
+			timestamp: Date.now()
+		};
+
+		// Send to Claude for analysis
+		const claudeResponse = await callClaudeAPIForSingleUrl(data);
+		if (!claudeResponse) {
+			console.log("Claude analysis failed for URL:", url);
+			return [];
+		}
+
+		// Parse Claude response and extract queries
+		const queries = parseClaudeResponseForQueries(claudeResponse);
+		console.log("Generated queries from Claude:", queries);
+		
+		return queries.slice(0, 3); // Limit to 3 queries for auto-caching
+	} catch (error) {
+		console.error("Error generating queries from URL:", error);
+		return [];
+	}
+}
+
+// Generate smart queries based on URL analysis
+function generateSmartQueriesFromUrl(url) {
+	try {
+		const urlObj = new URL(url);
+		const domain = urlObj.hostname;
+		const path = urlObj.pathname;
+		const queries = [];
+		
+		// Domain-based queries
+		if (domain.includes('github.com')) {
+			queries.push('github repositories programming');
+			queries.push('open source projects');
+		} else if (domain.includes('stackoverflow.com')) {
+			queries.push('programming questions answers');
+			queries.push('coding help');
+		} else if (domain.includes('youtube.com')) {
+			queries.push('video tutorials');
+			queries.push('educational content');
+		} else if (domain.includes('medium.com')) {
+			queries.push('articles blog posts');
+			queries.push('tech writing');
+		} else if (domain.includes('reddit.com')) {
+			queries.push('community discussions');
+			queries.push('user experiences');
+		} else if (domain.includes('wikipedia.org')) {
+			queries.push('encyclopedia information');
+			queries.push('reference material');
+		} else if (domain.includes('hellointerview.com')) {
+			queries.push('interview preparation');
+			queries.push('coding practice');
+		} else {
+			// Generic domain-based query
+			queries.push(domain);
+		}
+		
+		// Path-based queries
+		if (path && path !== '/' && path.length > 1) {
+			const pathParts = path.split('/').filter(part => part.length > 2);
+			if (pathParts.length > 0) {
+				const pathQuery = pathParts.join(' ');
+				queries.push(pathQuery);
+			}
+		}
+		
+		// Add general topic queries based on common patterns
+		if (path.includes('tutorial') || path.includes('guide')) {
+			queries.push('tutorials guides');
+		} else if (path.includes('api') || path.includes('documentation')) {
+			queries.push('API documentation');
+		} else if (path.includes('blog') || path.includes('article')) {
+			queries.push('blog articles');
+		}
+		
+		return [...new Set(queries)].filter(q => q.trim().length > 0);
+	} catch (error) {
+		console.error("Error generating smart queries from URL:", error);
+		return [];
+	}
+}
+
+// Get content from existing tab if user is still on the page
+async function getContentFromExistingTab(url) {
+	try {
+		// Find existing tab with this URL
+		const tabs = await chrome.tabs.query({ url: url });
+		if (tabs.length > 0) {
+			const tab = tabs[0];
+			// Send message to content script to get page content
+			const response = await chrome.tabs.sendMessage(tab.id, {
+				action: "getPageContent",
+			});
+			
+			if (response && response.content) {
+				console.log("Got content from existing tab");
+				return response.content;
+			}
+		}
+		return null;
+	} catch (error) {
+		console.log("Could not get content from existing tab:", error.message);
+		return null;
+	}
+}
+
+// Fetch page content using background fetch (no tab creation)
+async function fetchPageContent(url) {
+	try {
+		console.log("Fetching page content via background fetch:", url);
+		
+		// Use fetch to get the page content
+		const response = await fetch(url, {
+			method: 'GET',
+			headers: {
+				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+			}
+		});
+		
+		if (!response.ok) {
+			throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+		}
+		
+		const html = await response.text();
+		console.log("Successfully fetched page content via background fetch");
+		return html;
+	} catch (error) {
+		console.log("Background fetch failed:", error.message);
+		return null;
+	}
+}
+
+// Wait for tab to load completely
+async function waitForTabLoad(tabId, timeoutMs = 10000) {
+	return new Promise((resolve, reject) => {
+		let done = false;
+		const timer = setTimeout(() => {
+			if (done) return;
+			done = true;
+			cleanup();
+			reject(new Error("Tab load timeout"));
+		}, timeoutMs);
+
+		function onUpdated(updatedId, changeInfo) {
+			if (updatedId === tabId && changeInfo.status === "complete") {
+				if (done) return;
+				done = true;
+				cleanup();
+				resolve();
+			}
+		}
+		function cleanup() {
+			clearTimeout(timer);
+			chrome.tabs.onUpdated.removeListener(onUpdated);
+		}
+		chrome.tabs.onUpdated.addListener(onUpdated);
+	});
+}
+
+// Check if URL is from an extraction tab we created
+function isExtractionTab(url) {
+	// For now, we'll use a different approach - don't create tabs at all
+	// Instead, we'll use a simpler method that doesn't trigger history events
+	return false;
+}
+
+// Call Claude API for single URL analysis
+async function callClaudeAPIForSingleUrl(data) {
+	try {
+		// Ensure config is loaded
+		await ensureConfigLoaded();
+		
+		if (!CONFIG.CLAUDE_API_KEY) {
+			throw new Error("Claude API key not found in configuration.");
+		}
+
+		const prompt = createClaudePromptForSingleUrl(data);
+		
+		const response = await fetch(CONFIG.CLAUDE_API_URL, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'x-api-key': CONFIG.CLAUDE_API_KEY,
+				'anthropic-version': '2023-06-01',
+				'anthropic-dangerous-direct-browser-access': 'true'
+			},
+			body: JSON.stringify({
+				model: CONFIG.CLAUDE_MODEL,
+				max_tokens: 2000,
+				messages: [
+					{
+						role: "user",
+						content: prompt
+					}
+				]
+			})
+		});
+
+		if (!response.ok) {
+			const errorData = await response.json();
+			throw new Error(`Claude API error: ${response.status} - ${errorData.error?.message || 'Unknown error'}`);
+		}
+
+		const result = await response.json();
+		return result.content[0].text;
+	} catch (error) {
+		console.error("Error calling Claude API for single URL:", error);
+		throw error;
+	}
+}
+
+// Create Claude prompt for single URL analysis
+function createClaudePromptForSingleUrl(data) {
+	return `Analyze this single webpage and generate 3 relevant search queries that would help find related content.
+
+URL: ${data.url}
+Title: ${data.title}
+Content: ${data.content.substring(0, 2000)}...
+
+Please return a JSON array of 3 search queries that would help find related content to this page. Focus on:
+- The main topic/subject of the page
+- Related concepts or technologies mentioned
+- Similar content that users might be interested in
+
+Return only a JSON array like this:
+["query 1", "query 2", "query 3"]
+
+IMPORTANT: Return ONLY valid JSON. Do not include any markdown formatting, code blocks, or additional text.`;
+}
+
+// Parse Claude response to extract queries
+function parseClaudeResponseForQueries(claudeResponse) {
+	try {
+		// Clean the response to extract JSON from markdown code blocks
+		let cleanResponse = claudeResponse.trim();
+		
+		// Remove markdown code block markers if present
+		if (cleanResponse.startsWith('```json')) {
+			cleanResponse = cleanResponse.replace(/^```json\s*/, '');
+		}
+		if (cleanResponse.startsWith('```')) {
+			cleanResponse = cleanResponse.replace(/^```\s*/, '');
+		}
+		if (cleanResponse.endsWith('```')) {
+			cleanResponse = cleanResponse.replace(/\s*```$/, '');
+		}
+		
+		// Additional cleaning for common JSON issues
+		cleanResponse = cleanResponse.trim();
+		
+		// Try to find the JSON array if it's embedded in other text
+		const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
+		if (jsonMatch) {
+			cleanResponse = jsonMatch[0];
+		}
+		
+		const queries = JSON.parse(cleanResponse);
+		
+		// Validate that it's an array of strings
+		if (Array.isArray(queries) && queries.every(q => typeof q === 'string')) {
+			return queries.filter(q => q.trim().length > 0);
+		} else {
+			throw new Error("Invalid query format");
+		}
+	} catch (parseError) {
+		console.error("Error parsing Claude response for queries:", parseError);
+		console.error("Raw response:", claudeResponse);
+		return [];
+	}
+}
+
+// Check if URL is restricted
+function isRestrictedUrl(url) {
+	if (!url) return true;
+	const restricted = [
+		"chrome://",
+		"chrome-extension://",
+		"edge://",
+		"about:",
+		"view-source:",
+		"https://chrome.google.com/webstore",
+		"https://chromewebstore.google.com",
+	];
+	return restricted.some((prefix) => url.startsWith(prefix));
+}
+
+// Show notification for auto-caching
+async function showAutoCacheNotification(url, pagesCached) {
+	try {
+		// Create a simple notification
+		const notification = {
+			type: 'basic',
+			iconUrl: 'icons/icon48.png',
+			title: 'Cache-22 Auto-Caching',
+			message: `Cached ${pagesCached} related pages for ${new URL(url).hostname}`,
+			priority: 1
+		};
+		
+		// Note: Chrome notifications require permission in manifest
+		// For now, we'll just log it
+		console.log("Auto-cache notification:", notification.message);
+		
+		// TODO: Implement proper notification system
+	} catch (error) {
+		console.error("Error showing auto-cache notification:", error);
+	}
 }

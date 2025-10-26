@@ -2,6 +2,7 @@ document.addEventListener("DOMContentLoaded", function () {
 	const cacheButton = document.getElementById("cacheButton");
 	const analyzeButton = document.getElementById("analyzeButton");
 	const smartCacheButton = document.getElementById("smartCacheButton");
+	const autoCacheToggle = document.getElementById("autoCacheToggle");
 	const cachedPagesList = document.getElementById("cachedPagesList");
 	const categoriesList = document.getElementById("categoriesList");
 
@@ -13,6 +14,9 @@ document.addEventListener("DOMContentLoaded", function () {
 	loadCurrentTab();
 	loadCachedPages();
 	loadCachedCategories();
+	
+	// Update button state based on first-time analysis
+	updateSmartCacheButton();
 
 	// Cache button click handler
 	cacheButton.addEventListener("click", function () {
@@ -31,6 +35,16 @@ document.addEventListener("DOMContentLoaded", function () {
 		smartCacheButton.addEventListener("click", function () {
 			runAnalyzeAndSmartCache();
 		});
+	}
+
+	// Auto-cache toggle handler
+	if (autoCacheToggle) {
+		autoCacheToggle.addEventListener("change", function () {
+			toggleAutoCaching(this.checked);
+		});
+		
+		// Load current auto-caching preference
+		loadAutoCachingPreference();
 	}
 
 	// Load configuration
@@ -119,6 +133,72 @@ document.addEventListener("DOMContentLoaded", function () {
 		} catch (error) {
 			console.error("Error extracting config from text:", error);
 			return null;
+		}
+	}
+
+	// ===== STATE MANAGEMENT FUNCTIONS =====
+
+	// Check if first-time analysis has been completed
+	async function isFirstTimeAnalysis() {
+		try {
+			const result = await chrome.storage.local.get(['firstAnalysisComplete']);
+			return !result.firstAnalysisComplete;
+		} catch (error) {
+			console.error("Error checking first-time analysis status:", error);
+			return true; // Default to first time if error
+		}
+	}
+
+	// Mark first-time analysis as complete
+	async function markFirstAnalysisComplete() {
+		try {
+			await chrome.storage.local.set({ firstAnalysisComplete: true });
+			console.log("First analysis marked as complete");
+		} catch (error) {
+			console.error("Error marking first analysis complete:", error);
+		}
+	}
+
+	// Update smart cache button state based on first-time analysis
+	async function updateSmartCacheButton() {
+		try {
+			if (!smartCacheButton) return;
+			
+			const isFirstTime = await isFirstTimeAnalysis();
+			if (isFirstTime) {
+				smartCacheButton.disabled = false;
+				smartCacheButton.textContent = "🧠 Analyze + 🔎 Smart Cache";
+			} else {
+				smartCacheButton.disabled = true;
+				smartCacheButton.textContent = "✅ Analysis Complete - Auto-Caching Active";
+			}
+		} catch (error) {
+			console.error("Error updating smart cache button:", error);
+		}
+	}
+
+	// ===== AUTO-CACHING PREFERENCE FUNCTIONS =====
+
+	// Load auto-caching preference from storage
+	async function loadAutoCachingPreference() {
+		try {
+			if (!autoCacheToggle) return;
+			
+			const result = await chrome.storage.local.get(['autoCachingEnabled']);
+			const enabled = result.autoCachingEnabled !== false; // Default to enabled
+			autoCacheToggle.checked = enabled;
+		} catch (error) {
+			console.error("Error loading auto-caching preference:", error);
+		}
+	}
+
+	// Toggle auto-caching preference
+	async function toggleAutoCaching(enabled) {
+		try {
+			await chrome.storage.local.set({ autoCachingEnabled: enabled });
+			console.log("Auto-caching", enabled ? "enabled" : "disabled");
+		} catch (error) {
+			console.error("Error toggling auto-caching:", error);
 		}
 	}
 
@@ -248,8 +328,12 @@ document.addEventListener("DOMContentLoaded", function () {
 			});
 			if (response?.ok) {
 				await loadCachedPages();
+				
+				// Mark first analysis as complete
+				await markFirstAnalysisComplete();
+				
 				alert(
-					`Smart caching complete. Cached ${response.scraped} pages from ${response.totalCandidates} candidates.`
+					`Smart caching complete. Cached ${response.scraped} pages from ${response.totalCandidates} candidates. Auto-caching is now active!`
 				);
 			} else {
 				throw new Error(response?.error || "Unknown error");
@@ -258,10 +342,8 @@ document.addEventListener("DOMContentLoaded", function () {
 			console.error("Analyze + Smart cache error:", err);
 			alert(`Smart caching failed: ${String(err?.message || err)}`);
 		} finally {
-			if (smartCacheButton) {
-				smartCacheButton.disabled = false;
-				smartCacheButton.textContent = "🧠 Analyze + 🔎 Smart Cache";
-			}
+			// Update button state based on first-time analysis status
+			await updateSmartCacheButton();
 		}
 	}
 
