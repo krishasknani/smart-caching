@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Chrome Extension Rendering Diagnostics</title>
+    <style>
+      body {
+        font-family: Arial;
+        padding: 20px;
+      }
+      .test-section {
+        margin: 20px 0;
+        padding: 20px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+      }
+      iframe {
+        width: 100%;
+        height: 400px;
+        border: 2px solid #333;
+        margin: 10px 0;
+      }
+      .output {
+        background: #f5f5f5;
+        padding: 10px;
+        font-family: monospace;
+        font-size: 12px;
+        max-height: 200px;
+        overflow: auto;
+      }
+      button {
+        padding: 8px 16px;
+        margin: 5px;
+        cursor: pointer;
+        background: #2196f3;
+        color: white;
+        border: none;
+        border-radius: 4px;
+      }
+      button:hover {
+        background: #1976d2;
+      }
+      .success {
+        color: green;
+      }
+      .error {
+        color: red;
+      }
+      .warning {
+        color: orange;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🔍 Chrome Extension Rendering Diagnostics</h1>
+
+    <div class="test-section">
+      <h2>Test 1: Direct Server Access</h2>
+      <p>
+        This tests if the page renders correctly when loaded directly from the
+        server:
+      </p>
+      <button onclick="loadDirectServer()">Load Suptask Page</button>
+      <iframe id="direct-frame" style="display: none"></iframe>
+      <div id="direct-output" class="output"></div>
+    </div>
+
+    <div class="test-section">
+      <h2>Test 2: Chrome Extension Simulation</h2>
+      <p>This simulates how the Chrome extension opens the page:</p>
+      <button onclick="simulateExtensionOpen()">Simulate Extension Open</button>
+      <div id="extension-output" class="output"></div>
+    </div>
+
+    <div class="test-section">
+      <h2>Test 3: Resource Loading Analysis</h2>
+      <button onclick="analyzeResources()">Analyze Resource Loading</button>
+      <div id="resource-output" class="output"></div>
+    </div>
+
+    <div class="test-section">
+      <h2>Test 4: Console Error Monitor</h2>
+      <button onclick="monitorConsole()">Start Console Monitor</button>
+      <button onclick="stopMonitor()">Stop Monitor</button>
+      <div id="console-output" class="output"></div>
+    </div>
+
+    <script>
+      const CACHE_HASH = "ca2a26fcd44c952c";
+      const SERVER_URL = "http://localhost:3000";
+      let consoleMonitor = null;
+
+      function log(outputId, msg, type = "") {
+        const output = document.getElementById(outputId);
+        const entry = document.createElement("div");
+        entry.className = type;
+        entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        output.appendChild(entry);
+        output.scrollTop = output.scrollHeight;
+      }
+
+      function loadDirectServer() {
+        const frame = document.getElementById("direct-frame");
+        const url = `${SERVER_URL}/cached/${CACHE_HASH}/`;
+
+        log("direct-output", `Loading: ${url}`);
+        frame.style.display = "block";
+        frame.src = url;
+
+        frame.onload = () => {
+          log("direct-output", "Frame loaded successfully", "success");
+          analyzeFrameContent(frame, "direct-output");
+        };
+
+        frame.onerror = (e) => {
+          log("direct-output", `Frame load error: ${e}`, "error");
+        };
+      }
+
+      function analyzeFrameContent(frame, outputId) {
+        try {
+          const doc = frame.contentDocument;
+
+          // Check base tag
+          const baseTag = doc.querySelector("base");
+          if (baseTag) {
+            log(outputId, `Base tag found: href="${baseTag.href}"`, "success");
+          } else {
+            log(outputId, "No base tag found", "warning");
+          }
+
+          // Check CSS
+          const styleSheets = doc.querySelectorAll('link[rel="stylesheet"]');
+          log(outputId, `Found ${styleSheets.length} stylesheets`);
+
+          let loadedCSS = 0;
+          styleSheets.forEach((link, i) => {
+            if (link.sheet) {
+              loadedCSS++;
+              log(outputId, `✅ CSS ${i + 1}: ${link.href}`, "success");
+            } else {
+              log(outputId, `❌ CSS ${i + 1}: ${link.href}`, "error");
+            }
+          });
+
+          // Check scripts
+          const scripts = doc.querySelectorAll("script[src]");
+          log(outputId, `Found ${scripts.length} external scripts`);
+
+          // Check computed styles
+          const body = doc.body;
+          if (body) {
+            const styles = window.getComputedStyle(body);
+            log(outputId, `Body font: ${styles.fontFamily}`);
+            log(outputId, `Body bg: ${styles.backgroundColor}`);
+          }
+
+          // Check for React
+          const hasReact = doc.documentElement.innerHTML.includes("__react");
+          log(outputId, `React detected: ${hasReact ? "Yes" : "No"}`);
+        } catch (e) {
+          log(outputId, `Analysis error: ${e.message}`, "error");
+        }
+      }
+
+      function simulateExtensionOpen() {
+        // This simulates what happens when the extension opens a cached page
+        const url = `${SERVER_URL}/cached/${CACHE_HASH}/`;
+
+        log("extension-output", `Opening new tab with: ${url}`);
+        log("extension-output", "Note: Check the new tab for rendering issues");
+
+        // Open in new tab like the extension does
+        const newTab = window.open(url, "_blank");
+
+        if (newTab) {
+          log("extension-output", "New tab opened successfully", "success");
+          log("extension-output", "Check if CSS/JS loads in the new tab");
+
+          // Try to analyze after a delay
+          setTimeout(() => {
+            try {
+              log("extension-output", `New tab URL: ${newTab.location.href}`);
+            } catch (e) {
+              log(
+                "extension-output",
+                "Cannot access new tab (cross-origin)",
+                "warning"
+              );
+            }
+          }, 2000);
+        } else {
+          log(
+            "extension-output",
+            "Failed to open new tab (popup blocked?)",
+            "error"
+          );
+        }
+      }
+
+      async function analyzeResources() {
+        const url = `${SERVER_URL}/cached/${CACHE_HASH}/`;
+
+        try {
+          // Fetch the HTML
+          log("resource-output", `Fetching HTML from: ${url}`);
+          const response = await fetch(url);
+          const html = await response.text();
+
+          log("resource-output", `HTML size: ${html.length} bytes`, "success");
+
+          // Extract resource URLs
+          const cssMatches = html.match(/href="([^"]*\.css[^"]*)"/g) || [];
+          const jsMatches = html.match(/src="([^"]*\.js[^"]*)"/g) || [];
+
+          log("resource-output", `Found ${cssMatches.length} CSS references`);
+          log("resource-output", `Found ${jsMatches.length} JS references`);
+
+          // Test a CSS file
+          if (cssMatches.length > 0) {
+            const cssPath = cssMatches[0].match(/href="([^"]*)"/)[1];
+            const cssUrl = new URL(cssPath, url).href;
+
+            log("resource-output", `Testing CSS: ${cssUrl}`);
+            const cssResponse = await fetch(cssUrl);
+
+            if (cssResponse.ok) {
+              const cssSize = cssResponse.headers.get("content-length");
+              log(
+                "resource-output",
+                `✅ CSS loads OK (${cssSize} bytes)`,
+                "success"
+              );
+            } else {
+              log(
+                "resource-output",
+                `❌ CSS failed: ${cssResponse.status}`,
+                "error"
+              );
+            }
+          }
+
+          // Check for base tag
+          const hasBase = html.includes("<base");
+          log(
+            "resource-output",
+            `Base tag present: ${hasBase ? "Yes" : "No"}`,
+            hasBase ? "success" : "warning"
+          );
+
+          // Check for any absolute URLs
+          const absoluteUrls =
+            html.match(/(?:href|src)="https?:\/\/[^"]+"/g) || [];
+          if (absoluteUrls.length > 0) {
+            log(
+              "resource-output",
+              `⚠️ Found ${absoluteUrls.length} absolute URLs`,
+              "warning"
+            );
+            absoluteUrls.slice(0, 3).forEach((url) => {
+              log("resource-output", `  - ${url}`, "warning");
+            });
+          }
+        } catch (e) {
+          log("resource-output", `Analysis error: ${e.message}`, "error");
+        }
+      }
+
+      function monitorConsole() {
+        if (consoleMonitor) {
+          log("console-output", "Monitor already running", "warning");
+          return;
+        }
+
+        log("console-output", "Starting console monitor...", "success");
+        log(
+          "console-output",
+          "Open a cached page in a new tab and check back here"
+        );
+
+        // We can't directly monitor other tabs, but we can provide instructions
+        const instructions = `
+To monitor console errors:
+1. Open Chrome DevTools (F12)
+2. Go to the cached page
+3. Check the Console tab for:
+   - Red error messages
+   - Failed resource loads
+   - React hydration errors
+   - CORS errors
+            `;
+
+        log("console-output", instructions);
+      }
+
+      function stopMonitor() {
+        log("console-output", "Monitor stopped", "warning");
+      }
+    </script>
+  </body>
+</html>

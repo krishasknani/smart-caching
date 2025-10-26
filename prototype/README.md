@@ -58,6 +58,21 @@ http://localhost:3000/test-page.html
 2. Click **"View Cached"** again
 3. The site loads perfectly from the local cache!
 
+### 6. Test Parallel Caching (Optional)
+
+To test the performance benefits of parallel caching:
+
+```
+http://localhost:3000/test-batch-cache.html
+```
+
+This page lets you:
+
+- Cache multiple URLs at once
+- Compare sequential vs parallel caching speed
+- Adjust concurrency levels
+- See real-time progress and performance metrics
+
 ## Architecture
 
 ### Server Components
@@ -125,12 +140,12 @@ To cache pages requiring login:
 
 ```javascript
 fetch("/api/cache", {
-	method: "POST",
-	headers: { "Content-Type": "application/json" },
-	body: JSON.stringify({
-		url: "https://mail.google.com",
-		cookies: [{ name: "session", value: "abc123", domain: ".google.com" }],
-	}),
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    url: "https://mail.google.com",
+    cookies: [{ name: "session", value: "abc123", domain: ".google.com" }],
+  }),
 });
 ```
 
@@ -192,9 +207,9 @@ Cache a website with all assets.
 
 ```json
 {
-	"url": "https://example.com",
-	"maxDepth": 2,
-	"cookies": [] // optional - authentication cookies
+  "url": "https://example.com",
+  "maxDepth": 2,
+  "cookies": [] // optional - authentication cookies
 }
 ```
 
@@ -202,15 +217,59 @@ Cache a website with all assets.
 
 ```json
 {
-	"success": true,
-	"cacheHash": "abc123...",
-	"url": "https://example.com",
-	"stats": {
-		"pages": 5,
-		"assets": 42
-	}
+  "success": true,
+  "cacheHash": "abc123...",
+  "url": "https://example.com",
+  "stats": {
+    "pages": 5,
+    "assets": 42
+  }
 }
 ```
+
+### POST /api/cache/batch
+
+Cache multiple URLs in parallel for better performance.
+
+**Request:**
+
+```json
+{
+  "urls": ["https://example.com", "https://github.com", "https://nodejs.org"],
+  "maxDepth": 0,
+  "concurrency": 3 // optional - number of parallel browsers (default: 3)
+}
+```
+
+**Response:**
+
+```json
+{
+  "success": true,
+  "message": "Cached 3 out of 3 URLs",
+  "totalUrls": 3,
+  "successful": 3,
+  "failed": 0,
+  "results": [
+    {
+      "url": "https://example.com",
+      "success": true,
+      "cacheHash": "abc123",
+      "stats": {
+        "pages": 1,
+        "assets": 25
+      }
+    }
+  ],
+  "errors": []
+}
+```
+
+**Performance Benefits:**
+
+- 2-3x faster than sequential caching
+- Optimal concurrency: 3-5 depending on system resources
+- Each URL gets its own browser context for isolation
 
 ### GET /api/check/:url
 

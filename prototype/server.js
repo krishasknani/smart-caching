@@ -396,6 +396,28 @@ async function cachePage(url, options = {}) {
   const cachedPages = new Set();
   const rawPageData = []; // Store raw HTML data for second-pass rewriting
 
+  // Check for known problematic sites that block automation
+  const problematicDomains = [
+    "browserstack.com",
+    "code.visualstudio.com",
+    "visualstudio.com",
+    "claude.ai",
+    "anthropic.com",
+    "stackoverflow.com",
+  ];
+
+  const urlDomain = new URL(normalizedUrl).hostname;
+  const isProblematicSite = problematicDomains.some((domain) =>
+    urlDomain.includes(domain)
+  );
+
+  if (isProblematicSite) {
+    console.warn(`⚠️  ${urlDomain} is known to have anti-bot protection.`);
+    console.warn(
+      `    Consider using simple HTML caching from the Chrome extension instead.`
+    );
+  }
+
   while (pagesToCache.length > 0) {
     const { url: pageUrl, depth } = pagesToCache.shift();
 
@@ -561,9 +583,12 @@ async function cachePage(url, options = {}) {
 
       let response;
       try {
+        // Use shorter timeout for known problematic sites to fail faster
+        const navigationTimeout = isProblematicSite ? 15000 : 60000;
+
         response = await page.goto(pageUrl, {
           waitUntil: "networkidle",
-          timeout: 60000,
+          timeout: navigationTimeout,
         });
       } catch (navError) {
         console.error(`  ❌ Navigation error: ${navError.message}`);
@@ -1067,6 +1092,16 @@ async function cachePage(url, options = {}) {
   // Check if we actually cached anything
   if (manifest.pages.length === 0) {
     await browser.close();
+
+    if (isProblematicSite) {
+      console.log(
+        `ℹ️  ${urlDomain} has anti-bot protection - skipping Playwright cache`
+      );
+      throw new Error(
+        "Site has anti-bot protection - use simple HTML caching instead"
+      );
+    }
+
     throw new Error("Failed to cache any pages - no content was saved");
   }
 
@@ -1162,6 +1197,19 @@ async function cachePage(url, options = {}) {
     );
 
     console.log(`  → Rewrote inline scripts for dynamic module loading`);
+
+    // Add base tag to ensure relative paths resolve correctly
+    // This is crucial when the page is loaded from http://localhost:3000/cached/{hash}/
+    if (!rewrittenHtml.includes("<base")) {
+      const baseHref = isLinkedPage ? `../` : `./`;
+      rewrittenHtml = rewrittenHtml.replace(
+        /<head([^>]*)>/i,
+        `<head$1><base href="${baseHref}">`
+      );
+      console.log(
+        `  → Added base href="${baseHref}" for proper path resolution`
+      );
+    }
 
     // Add offline indicator banner and fallback interaction script
     const offlineBanner = `
@@ -1266,6 +1314,43 @@ async function cachePage(url, options = {}) {
     JSON.stringify(manifest, null, 2)
   );
 
+  // Validate the main index.html has been properly hydrated
+  const indexPath = path.join(cacheDir, "index.html");
+  try {
+    const indexContent = await fs.readFile(indexPath, "utf8");
+
+    // Check critical hydration elements
+    const validationChecks = {
+      hasContent: indexContent.length > 1000, // Should have substantial content
+      hasBaseTag: indexContent.includes("<base href"),
+      hasOfflineBanner: indexContent.includes("Cached Content"),
+      hasAssets: indexContent.includes("./assets/"),
+      noAbsoluteUrls:
+        !indexContent.match(/(?:href|src)="https?:\/\/[^"]+"/g) ||
+        indexContent.includes("./assets/"), // Either no absolute URLs or they're rewritten
+    };
+
+    const failedChecks = Object.entries(validationChecks)
+      .filter(([_, passed]) => !passed)
+      .map(([check, _]) => check);
+
+    if (failedChecks.length > 0) {
+      console.warn(
+        `⚠️  Page may not be properly hydrated. Failed checks: ${failedChecks.join(
+          ", "
+        )}`
+      );
+      // Don't throw error, just warn - some sites might legitimately fail some checks
+    }
+  } catch (err) {
+    console.warn(`⚠️  Could not validate hydration: ${err.message}`);
+  }
+
+  console.log(`\n✅ Caching complete!`);
+  console.log(`📁 Cache directory: ${cacheDir}`);
+  console.log(`📊 Total pages: ${manifest.pages.length}`);
+  console.log(`📊 Total assets: ${manifest.assets.length}`);
+
   return {
     success: manifest.pages.length > 0,
     cacheHash,
@@ -1352,6 +1437,109 @@ app.get("/api/check/:url", async (req, res) => {
   }
 });
 
+// Batch cache endpoint - process multiple URLs in parallel
+app.post("/api/cache/batch", async (req, res) => {
+  try {
+    const { urls, maxDepth = 0, concurrency = 3 } = req.body;
+
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({ error: "URLs array is required" });
+    }
+
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`Starting batch cache for ${urls.length} URLs`);
+    console.log(`Concurrency limit: ${concurrency}`);
+    console.log(`${"=".repeat(60)}\n`);
+
+    const results = [];
+    const errors = [];
+
+    // Process URLs in batches with concurrency limit
+    async function processBatch(batch, batchIndex) {
+      const batchPromises = batch.map(async (url, indexInBatch) => {
+        const globalIndex = batchIndex * concurrency + indexInBatch;
+        try {
+          // Add a small stagger to prevent all browsers launching at once
+          if (indexInBatch > 0) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, indexInBatch * 500)
+            );
+          }
+
+          console.log(`[${globalIndex + 1}/${urls.length}] Caching: ${url}`);
+          const result = await cachePage(url, { maxDepth });
+
+          results.push({
+            url,
+            success: true,
+            cacheHash: result.cacheHash,
+            stats: {
+              pages: result.manifest.pages.length,
+              assets: result.manifest.assets.length,
+            },
+          });
+
+          console.log(
+            `[${globalIndex + 1}/${urls.length}] ✅ Completed: ${url}`
+          );
+          return result;
+        } catch (error) {
+          // Check if it's an anti-bot protection error
+          if (error.message.includes("anti-bot protection")) {
+            console.log(
+              `[${globalIndex + 1}/${
+                urls.length
+              }] ℹ️  Skipping ${url} - has anti-bot protection`
+            );
+          } else {
+            console.error(
+              `[${globalIndex + 1}/${urls.length}] ❌ Failed: ${url} - ${
+                error.message
+              }`
+            );
+          }
+
+          errors.push({
+            url,
+            success: false,
+            error: error.message,
+          });
+          return null;
+        }
+      });
+
+      return Promise.all(batchPromises);
+    }
+
+    // Split URLs into batches based on concurrency
+    const batches = [];
+    for (let i = 0; i < urls.length; i += concurrency) {
+      batches.push(urls.slice(i, i + concurrency));
+    }
+
+    // Process each batch sequentially
+    for (let i = 0; i < batches.length; i++) {
+      await processBatch(batches[i], i);
+    }
+
+    res.json({
+      success: true,
+      message: `Cached ${results.length} out of ${urls.length} URLs`,
+      totalUrls: urls.length,
+      successful: results.length,
+      failed: errors.length,
+      results,
+      errors,
+    });
+  } catch (error) {
+    console.error("Batch caching error:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 // Get cached content for extension
 app.get("/api/content/:hash", async (req, res) => {
   try {
@@ -1371,9 +1559,14 @@ app.get("/api/content/:hash", async (req, res) => {
         url: manifest.url,
       });
     } catch (err) {
+      // Just log instead of returning error - this is expected for problematic sites
+      console.log(
+        `ℹ️  Cache not found for hash ${hash} - site may have anti-bot protection`
+      );
+
       res.status(404).json({
         success: false,
-        error: "Cached content not found",
+        error: "Cache not available - site may have anti-bot protection",
       });
     }
   } catch (error) {

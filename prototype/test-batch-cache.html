@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Batch Cache Test</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        color: #2196f3;
+      }
+
+      .test-section {
+        margin: 20px 0;
+        padding: 20px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        background: #f9f9f9;
+      }
+
+      textarea {
+        width: 100%;
+        min-height: 150px;
+        font-family: monospace;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+
+      input[type="number"] {
+        width: 100px;
+        padding: 8px;
+        margin: 0 10px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+      }
+
+      button {
+        padding: 10px 20px;
+        margin: 5px;
+        cursor: pointer;
+        background: #2196f3;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 16px;
+      }
+
+      button:hover:not(:disabled) {
+        background: #1976d2;
+      }
+
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+
+      .results {
+        background: #fff;
+        padding: 15px;
+        border-radius: 4px;
+        margin-top: 20px;
+        border: 1px solid #ddd;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .result-item {
+        padding: 8px;
+        margin: 4px 0;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 14px;
+      }
+
+      .success {
+        background: #e8f5e9;
+        color: #2e7d32;
+      }
+
+      .error {
+        background: #ffebee;
+        color: #c62828;
+      }
+
+      .info {
+        background: #e3f2fd;
+        color: #1565c0;
+      }
+
+      .stats {
+        margin-top: 20px;
+        padding: 15px;
+        background: #fff3e0;
+        border-radius: 4px;
+        font-size: 18px;
+      }
+
+      .progress-bar {
+        width: 100%;
+        height: 30px;
+        background: #e0e0e0;
+        border-radius: 15px;
+        margin: 20px 0;
+        overflow: hidden;
+      }
+
+      .progress-fill {
+        height: 100%;
+        background: #4caf50;
+        transition: width 0.3s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🚀 Parallel Cache Testing</h1>
+
+    <div class="test-section">
+      <h2>Test URLs</h2>
+      <p>Enter one URL per line to test parallel caching:</p>
+      <textarea id="urls" placeholder="Enter URLs, one per line...">
+https://github.com
+https://nodejs.org
+https://www.npmjs.com
+https://developer.mozilla.org
+https://stackoverflow.com</textarea
+      >
+
+      <div style="margin-top: 15px">
+        <label>
+          Concurrency limit:
+          <input type="number" id="concurrency" value="3" min="1" max="10" />
+        </label>
+        <span style="color: #666; margin-left: 10px">
+          (Number of URLs to cache in parallel)
+        </span>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>Cache Options</h2>
+      <button onclick="startSequentialCache()" id="sequentialBtn">
+        🐌 Cache Sequential (One by One)
+      </button>
+      <button onclick="startBatchCache()" id="batchBtn">
+        🚀 Cache Parallel (Batch)
+      </button>
+      <button onclick="clearResults()" id="clearBtn">🗑️ Clear Results</button>
+    </div>
+
+    <div class="test-section">
+      <h2>Progress</h2>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressBar" style="width: 0%">0%</div>
+      </div>
+    </div>
+
+    <div class="test-section">
+      <h2>Results</h2>
+      <div id="results" class="results">
+        <div class="result-item info">Ready to start caching...</div>
+      </div>
+      <div id="stats" class="stats" style="display: none"></div>
+    </div>
+
+    <script>
+      const resultsDiv = document.getElementById("results");
+      const progressBar = document.getElementById("progressBar");
+      const statsDiv = document.getElementById("stats");
+      let startTime;
+      let totalUrls = 0;
+      let completedUrls = 0;
+
+      function log(message, type = "info") {
+        const item = document.createElement("div");
+        item.className = `result-item ${type}`;
+        item.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        resultsDiv.appendChild(item);
+        resultsDiv.scrollTop = resultsDiv.scrollHeight;
+      }
+
+      function updateProgress() {
+        const percentage = Math.round((completedUrls / totalUrls) * 100);
+        progressBar.style.width = percentage + "%";
+        progressBar.textContent = percentage + "%";
+      }
+
+      function getUrls() {
+        const urlsText = document.getElementById("urls").value;
+        return urlsText
+          .split("\n")
+          .map((url) => url.trim())
+          .filter((url) => url && url.startsWith("http"));
+      }
+
+      function clearResults() {
+        resultsDiv.innerHTML =
+          '<div class="result-item info">Ready to start caching...</div>';
+        statsDiv.style.display = "none";
+        progressBar.style.width = "0%";
+        progressBar.textContent = "0%";
+        completedUrls = 0;
+      }
+
+      function showStats(duration, method) {
+        statsDiv.style.display = "block";
+        statsDiv.innerHTML = `
+                <h3>📊 Caching Complete!</h3>
+                <p><strong>Method:</strong> ${method}</p>
+                <p><strong>Total URLs:</strong> ${totalUrls}</p>
+                <p><strong>Successful:</strong> ${completedUrls}</p>
+                <p><strong>Failed:</strong> ${totalUrls - completedUrls}</p>
+                <p><strong>Time taken:</strong> ${duration.toFixed(
+                  2
+                )} seconds</p>
+                <p><strong>Average per URL:</strong> ${(
+                  duration / totalUrls
+                ).toFixed(2)} seconds</p>
+            `;
+      }
+
+      async function startSequentialCache() {
+        const urls = getUrls();
+        if (urls.length === 0) {
+          alert("Please enter at least one URL");
+          return;
+        }
+
+        clearResults();
+        disableButtons(true);
+
+        totalUrls = urls.length;
+        completedUrls = 0;
+        startTime = Date.now();
+
+        log(
+          `🐌 Starting sequential caching for ${urls.length} URLs...`,
+          "info"
+        );
+
+        for (let i = 0; i < urls.length; i++) {
+          const url = urls[i];
+          log(`[${i + 1}/${urls.length}] Caching: ${url}`, "info");
+
+          try {
+            const response = await fetch("/api/cache", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ url, maxDepth: 0 }),
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+              completedUrls++;
+              log(
+                `✅ [${i + 1}/${urls.length}] Cached: ${url} (${
+                  result.stats.assets
+                } assets)`,
+                "success"
+              );
+            } else {
+              log(
+                `❌ [${i + 1}/${urls.length}] Failed: ${url} - ${result.error}`,
+                "error"
+              );
+            }
+          } catch (error) {
+            log(
+              `❌ [${i + 1}/${urls.length}] Error: ${url} - ${error.message}`,
+              "error"
+            );
+          }
+
+          updateProgress();
+        }
+
+        const duration = (Date.now() - startTime) / 1000;
+        showStats(duration, "🐌 Sequential (One by One)");
+        disableButtons(false);
+      }
+
+      async function startBatchCache() {
+        const urls = getUrls();
+        if (urls.length === 0) {
+          alert("Please enter at least one URL");
+          return;
+        }
+
+        const concurrency = parseInt(
+          document.getElementById("concurrency").value
+        );
+
+        clearResults();
+        disableButtons(true);
+
+        totalUrls = urls.length;
+        completedUrls = 0;
+        startTime = Date.now();
+
+        log(
+          `🚀 Starting parallel caching for ${urls.length} URLs (concurrency: ${concurrency})...`,
+          "info"
+        );
+
+        try {
+          const response = await fetch("/api/cache/batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ urls, maxDepth: 0, concurrency }),
+          });
+
+          const result = await response.json();
+
+          if (result.success) {
+            // Process results
+            result.results.forEach((res) => {
+              completedUrls++;
+              log(
+                `✅ Cached: ${res.url} (${res.stats.assets} assets)`,
+                "success"
+              );
+            });
+
+            // Process errors
+            result.errors.forEach((err) => {
+              log(`❌ Failed: ${err.url} - ${err.error}`, "error");
+            });
+
+            updateProgress();
+
+            const duration = (Date.now() - startTime) / 1000;
+            showStats(
+              duration,
+              `🚀 Parallel (Batch, concurrency: ${concurrency})`
+            );
+          } else {
+            log(`❌ Batch cache failed: ${result.error}`, "error");
+          }
+        } catch (error) {
+          log(`❌ Error: ${error.message}`, "error");
+        }
+
+        disableButtons(false);
+      }
+
+      function disableButtons(disabled) {
+        document.getElementById("sequentialBtn").disabled = disabled;
+        document.getElementById("batchBtn").disabled = disabled;
+        document.getElementById("clearBtn").disabled = disabled;
+      }
+    </script>
+  </body>
+</html>
