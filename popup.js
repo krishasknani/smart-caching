@@ -91,18 +91,28 @@ document.addEventListener("DOMContentLoaded", function () {
 				config.MAX_TABS_ITEMS = parseInt(tabsMatch[1]);
 			}
 
-			// Extract Brave API key
-			const braveKeyMatch = configText.match(/BRAVE_API_KEY:\s*"([^"]+)"/);
-			if (braveKeyMatch) {
-				config.BRAVE_API_KEY = braveKeyMatch[1];
+			// Extract Bright Data token
+			const brightDataTokenMatch = configText.match(
+				/BRIGHTDATA_TOKEN:\s*"([^"]+)"/
+			);
+			if (brightDataTokenMatch) {
+				config.BRIGHTDATA_TOKEN = brightDataTokenMatch[1];
 			}
 
-			// Optional: Brave results per query
-			const braveCountMatch = configText.match(
-				/BRAVE_RESULTS_PER_QUERY:\s*(\d+)/
+			// Extract Bright Data zone
+			const brightDataZoneMatch = configText.match(
+				/BRIGHTDATA_ZONE:\s*"([^"]+)"/
 			);
-			if (braveCountMatch) {
-				config.BRAVE_RESULTS_PER_QUERY = parseInt(braveCountMatch[1]);
+			if (brightDataZoneMatch) {
+				config.BRIGHTDATA_ZONE = brightDataZoneMatch[1];
+			}
+
+			// Optional: SERP results per query
+			const serpCountMatch = configText.match(
+				/SERP_RESULTS_PER_QUERY:\s*(\d+)/
+			);
+			if (serpCountMatch) {
+				config.SERP_RESULTS_PER_QUERY = parseInt(serpCountMatch[1]);
 			}
 
 			return config;
@@ -137,9 +147,12 @@ document.addEventListener("DOMContentLoaded", function () {
 
 			// Ensure config loaded
 			if (!CONFIG) await loadConfig();
-			const apiKey = (CONFIG?.BRAVE_API_KEY || "").trim();
-			if (!apiKey) {
-				alert("Missing Brave API key. Please set BRAVE_API_KEY in config.js.");
+			const token = (CONFIG?.BRIGHTDATA_TOKEN || "").trim();
+			const zone = (CONFIG?.BRIGHTDATA_ZONE || "").trim();
+			if (!token || !zone) {
+				alert(
+					"Missing Bright Data credentials. Please set BRIGHTDATA_TOKEN and BRIGHTDATA_ZONE in config.js."
+				);
 				return;
 			}
 
@@ -166,14 +179,14 @@ document.addEventListener("DOMContentLoaded", function () {
 				return;
 			}
 
-			const resultsPerQuery = CONFIG?.BRAVE_RESULTS_PER_QUERY || 5;
+			const resultsPerQuery = CONFIG?.SERP_RESULTS_PER_QUERY || 5;
 			const response = await chrome.runtime.sendMessage({
 				action: "runSmartCaching",
-				apiKey,
+				token,
+				zone,
 				queries,
 				resultsPerQuery,
 			});
-
 			if (response?.ok) {
 				await loadCachedPages();
 				alert(
@@ -203,9 +216,12 @@ document.addEventListener("DOMContentLoaded", function () {
 
 			// Ensure config loaded
 			if (!CONFIG) await loadConfig();
-			const apiKey = (CONFIG?.BRAVE_API_KEY || "").trim();
-			if (!apiKey) {
-				alert("Missing Brave API key. Please set BRAVE_API_KEY in config.js.");
+			const token = (CONFIG?.BRIGHTDATA_TOKEN || "").trim();
+			const zone = (CONFIG?.BRIGHTDATA_ZONE || "").trim();
+			if (!token || !zone) {
+				alert(
+					"Missing Bright Data credentials. Please set BRIGHTDATA_TOKEN and BRIGHTDATA_ZONE in config.js."
+				);
 				return;
 			}
 
@@ -222,14 +238,14 @@ document.addEventListener("DOMContentLoaded", function () {
 				return;
 			}
 
-			const resultsPerQuery = CONFIG?.BRAVE_RESULTS_PER_QUERY || 5;
+			const resultsPerQuery = CONFIG?.SERP_RESULTS_PER_QUERY || 5;
 			const response = await chrome.runtime.sendMessage({
 				action: "runSmartCaching",
-				apiKey,
+				token,
+				zone,
 				queries,
 				resultsPerQuery,
 			});
-
 			if (response?.ok) {
 				await loadCachedPages();
 				alert(

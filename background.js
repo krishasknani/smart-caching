@@ -102,18 +102,26 @@ function extractConfigFromText(configText) {
 			config.MAX_TABS_ITEMS = parseInt(tabsMatch[1]);
 		}
 
-		// Extract Brave API key
-		const braveKeyMatch = configText.match(/BRAVE_API_KEY:\s*"([^"]+)"/);
-		if (braveKeyMatch) {
-			config.BRAVE_API_KEY = braveKeyMatch[1];
+		// Extract Bright Data token
+		const brightDataTokenMatch = configText.match(
+			/BRIGHTDATA_TOKEN:\s*"([^"]+)"/
+		);
+		if (brightDataTokenMatch) {
+			config.BRIGHTDATA_TOKEN = brightDataTokenMatch[1];
 		}
 
-		// Optional: results per query for Brave
-		const braveCountMatch = configText.match(
-			/BRAVE_RESULTS_PER_QUERY:\s*(\d+)/
+		// Extract Bright Data zone
+		const brightDataZoneMatch = configText.match(
+			/BRIGHTDATA_ZONE:\s*"([^"]+)"/
 		);
-		if (braveCountMatch) {
-			config.BRAVE_RESULTS_PER_QUERY = parseInt(braveCountMatch[1]);
+		if (brightDataZoneMatch) {
+			config.BRIGHTDATA_ZONE = brightDataZoneMatch[1];
+		}
+
+		// Optional: results per query for SERP
+		const serpCountMatch = configText.match(/SERP_RESULTS_PER_QUERY:\s*(\d+)/);
+		if (serpCountMatch) {
+			config.SERP_RESULTS_PER_QUERY = parseInt(serpCountMatch[1]);
 		}
 
 		return config;
@@ -134,12 +142,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 		return true; // Keep message channel open for async response
 	}
 
-	// Smart Caching: Run Brave search -> scrape -> cache
+	// Smart Caching: Run Bright Data SERP search -> scrape -> cache
 	if (request?.action === "runSmartCaching") {
 		(async () => {
 			try {
 				await ensureConfigLoaded();
-				const apiKey = (request.apiKey || CONFIG.BRAVE_API_KEY || "").trim();
+				const token = (request.token || CONFIG.BRIGHTDATA_TOKEN || "").trim();
+				const zone = (request.zone || CONFIG.BRIGHTDATA_ZONE || "").trim();
 				let queries = Array.isArray(request.queries)
 					? request.queries.filter((q) => q && q.trim())
 					: [];
@@ -152,18 +161,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 				// Safety cap in case caller sends too many
 				queries = queries.slice(0, 10);
 				const resultsPerQuery = clampInt(
-					request.resultsPerQuery ?? CONFIG.BRAVE_RESULTS_PER_QUERY,
+					request.resultsPerQuery ?? CONFIG.SERP_RESULTS_PER_QUERY,
 					1,
 					20,
 					5
 				);
 
-				if (!apiKey) throw new Error("Missing Brave API key");
+				if (!token) throw new Error("Missing Bright Data token");
+				if (!zone) throw new Error("Missing Bright Data zone");
 				if (queries.length === 0) throw new Error("No queries provided");
 
 				const allUrls = [];
 				for (const q of queries) {
-					const urls = await braveSearch(apiKey, q, resultsPerQuery);
+					const urls = await brightDataSearch(token, zone, q, resultsPerQuery);
 					allUrls.push(...urls);
 				}
 
@@ -383,35 +393,38 @@ async function handleClaudeAnalysis(data) {
 	}
 }
 
-// ================= Brave Search + Scraping Helpers =================
+// ================= Bright Data SERP + Scraping Helpers =================
 
-async function braveSearch(apiKey, query, count = 5) {
-	// Global throttle to respect Brave Free plan rate limits (~1 req/sec)
-	// We'll also retry on 429/5xx with exponential backoff.
-	await waitForBraveRateLimitSlot();
-
-	const url = new URL("https://api.search.brave.com/res/v1/web/search");
-	url.searchParams.set("q", query);
-	url.searchParams.set("count", String(clampInt(count, 1, 20, 5)));
-	url.searchParams.set("country", "US");
-	url.searchParams.set("safesearch", "moderate");
+async function brightDataSearch(token, zone, query, count = 5) {
+	// Construct the Google search URL with the query
+	const target = `https://www.google.com/search?q=${encodeURIComponent(
+		query
+	)}&brd_json=1`;
 
 	let attempt = 0;
 	const maxAttempts = 5;
 	let lastError;
+
 	while (attempt < maxAttempts) {
 		attempt++;
 		try {
-			const res = await fetch(url.toString(), {
-				method: "GET",
+			const res = await fetch("https://api.brightdata.com/request", {
+				method: "POST",
 				headers: {
-					"X-Subscription-Token": apiKey,
+					Authorization: `Bearer ${token}`,
+					"Content-Type": "application/json",
 				},
+				body: JSON.stringify({
+					zone,
+					url: target,
+					format: "raw",
+					country: "US",
+				}),
 			});
 
 			if (res.ok) {
 				const data = await res.json();
-				return extractUrlsFromBraveResponse(data);
+				return extractUrlsFromBrightDataResponse(data, count);
 			}
 
 			// Not OK: decide whether to retry
@@ -423,46 +436,28 @@ async function braveSearch(apiKey, query, count = 5) {
 			// 429 or 5xx -> retry with backoff
 			if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
 				lastError = new Error(
-					`Brave API error ${res.status}: ${bodyText || res.statusText}`
+					`Bright Data API error ${res.status}: ${bodyText || res.statusText}`
 				);
-				// Honor Retry-After if provided
-				const retryAfter = res.headers.get("retry-after");
-				let delayMs = retryAfter
-					? Math.min(10000, Math.max(1000, parseFloat(retryAfter) * 1000))
-					: backoffMs(attempt);
+				const delayMs = backoffMs(attempt);
 				await sleep(delayMs);
-				// After waiting, also enforce the 1 rps slot again
-				await waitForBraveRateLimitSlot();
 				continue;
 			}
 
 			// Other HTTP errors: do not retry
 			throw new Error(
-				`Brave API error ${res.status}: ${bodyText || res.statusText}`
+				`Bright Data API error ${res.status}: ${bodyText || res.statusText}`
 			);
 		} catch (err) {
 			lastError = err;
 			// Network errors -> retry with backoff
 			if (attempt < maxAttempts) {
 				await sleep(backoffMs(attempt));
-				await waitForBraveRateLimitSlot();
 				continue;
 			}
 			break;
 		}
 	}
-	throw lastError || new Error("Unknown Brave API error");
-}
-
-// Simple global rate limiter state for Brave API
-let BRAVE_NEXT_AVAILABLE_TS = 0;
-const BRAVE_MIN_INTERVAL_MS = 1100; // 1.1s spacing for safety
-
-async function waitForBraveRateLimitSlot() {
-	const now = Date.now();
-	const waitMs = Math.max(0, BRAVE_NEXT_AVAILABLE_TS - now);
-	if (waitMs > 0) await sleep(waitMs);
-	BRAVE_NEXT_AVAILABLE_TS = Date.now() + BRAVE_MIN_INTERVAL_MS;
+	throw lastError || new Error("Unknown Bright Data API error");
 }
 
 function backoffMs(attempt) {
@@ -474,16 +469,29 @@ function sleep(ms) {
 	return new Promise((r) => setTimeout(r, ms));
 }
 
-function extractUrlsFromBraveResponse(data) {
+function extractUrlsFromBrightDataResponse(data, count = 5) {
 	const urls = [];
 	try {
-		const web = data?.web?.results || [];
-		for (const item of web) {
-			const u = (item?.url || "").trim();
-			if (u && (u.startsWith("http://") || u.startsWith("https://")))
-				urls.push(u);
+		// With format: "raw", Bright Data returns parsed JSON directly
+		// The organic array is directly accessible
+		const organic = data?.organic || [];
+
+		// Extract URLs from results
+		for (const item of organic) {
+			// Use 'link' field from organic results
+			const url = item?.link;
+
+			if (url && typeof url === "string") {
+				const u = url.trim();
+				if (u && (u.startsWith("http://") || u.startsWith("https://"))) {
+					urls.push(u);
+				}
+				if (urls.length >= count) break;
+			}
 		}
-	} catch {}
+	} catch (err) {
+		console.error("Error extracting URLs:", err);
+	}
 	return urls;
 }
 

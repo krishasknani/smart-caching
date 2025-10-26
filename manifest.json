@@ -12,7 +12,7 @@
 		"offscreen"
 	],
 	"host_permissions": [
-		"https://api.search.brave.com/*",
+		"https://api.brightdata.com/*",
 		"https://*/",
 		"http://*/"
 	],

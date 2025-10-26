@@ -5,11 +5,12 @@ const CONFIG = {
 	// Claude API Configuration
 	CLAUDE_API_KEY: "your-claude-api-key-here",
 
-	// Brave Search API (used for smart caching discovery)
-	// Get a key at https://api.search.brave.com/
-	BRAVE_API_KEY: "your-brave-api-key-here",
+	// Bright Data SERP API (used for smart caching discovery)
+	// Get credentials at https://brightdata.com/
+	BRIGHTDATA_TOKEN: "your-brightdata-token-here",
+	BRIGHTDATA_ZONE: "your-brightdata-zone-here",
 	// Optional: how many results to fetch per query
-	BRAVE_RESULTS_PER_QUERY: 5,
+	SERP_RESULTS_PER_QUERY: 5,
 
 	// API Settings
 	CLAUDE_API_URL: "https://api.anthropic.com/v1/messages",
