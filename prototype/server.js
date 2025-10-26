@@ -43,9 +43,24 @@ function getFileExtension(contentType, url) {
     if (ext) return `.${ext}`;
   }
 
-  const urlPath = new URL(url).pathname;
-  const match = urlPath.match(/\.[a-z0-9]+$/i);
-  return match ? match[0] : ".bin";
+  try {
+    const urlObj = new URL(url);
+
+    // Handle Next.js image URLs
+    if (urlObj.pathname.includes("/_next/image")) {
+      const imageUrl = urlObj.searchParams.get("url");
+      if (imageUrl) {
+        // Extract extension from the original image URL
+        const match = imageUrl.match(/\.[a-z0-9]+$/i);
+        return match ? match[0] : ".jpg"; // Default to .jpg for Next images
+      }
+    }
+
+    const match = urlObj.pathname.match(/\.[a-z0-9]+$/i);
+    return match ? match[0] : ".bin";
+  } catch (e) {
+    return ".bin";
+  }
 }
 
 // Determine asset category
@@ -89,14 +104,30 @@ function rewriteHtmlUrls(html, baseUrl, urlMapping, cacheHash) {
     // Escape special regex characters in URL
     const escapedUrl = originalUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+    // Also create HTML-encoded version for Next.js URLs
+    const htmlEncodedUrl = originalUrl
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const escapedHtmlUrl = htmlEncodedUrl.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
     // Replace in various HTML contexts
     const patterns = [
       new RegExp(`(href|src)=["']${escapedUrl}["']`, "gi"),
+      new RegExp(`(href|src)=["']${escapedHtmlUrl}["']`, "gi"),
       new RegExp(
         `(href|src)=["']${escapedUrl.replace(/^https?:/, "")}["']`,
         "gi"
       ),
       new RegExp(`url\\(["']?${escapedUrl}["']?\\)`, "gi"),
+      // Also handle in srcset where URLs might be standalone
+      new RegExp(`${escapedUrl}(\\s+\\d+w)?`, "gi"),
+      new RegExp(`${escapedHtmlUrl}(\\s+\\d+w)?`, "gi"),
     ];
 
     patterns.forEach((pattern) => {
@@ -104,7 +135,13 @@ function rewriteHtmlUrls(html, baseUrl, urlMapping, cacheHash) {
         if (match.includes("href=") || match.includes("src=")) {
           return match
             .replace(originalUrl, localPath)
+            .replace(htmlEncodedUrl, localPath)
             .replace(originalUrl.replace(/^https?:/, ""), localPath);
+        } else if (match.match(/\s+\d+w$/)) {
+          // Handle srcset entries with width descriptors
+          return match
+            .replace(originalUrl, localPath)
+            .replace(htmlEncodedUrl, localPath);
         } else {
           return `url('${localPath}')`;
         }
@@ -114,17 +151,85 @@ function rewriteHtmlUrls(html, baseUrl, urlMapping, cacheHash) {
 
   // Handle relative URLs - make them absolute to the cached location
   rewritten = rewritten.replace(
-    /(href|src)=["'](?!http|\/\/|data:|#|mailto:)([^"']+)["']/gi,
+    /(href|src)=["'](?!http|\/\/|data:|#|mailto:|\.\/assets)([^"']+)["']/gi,
     (match, attr, relUrl) => {
       try {
-        const absoluteUrl = new URL(relUrl, baseUrl).href;
+        // Decode HTML entities in the relative URL
+        const decodedUrl = relUrl
+          .replace(/&amp;/g, "&")
+          .replace(/&quot;/g, '"')
+          .replace(/&#39;/g, "'")
+          .replace(/&lt;/g, "<")
+          .replace(/&gt;/g, ">");
+
+        // For root-relative URLs like /_next/image, prepend the origin
+        const absoluteUrl = decodedUrl.startsWith("/")
+          ? new URL(decodedUrl, origin).href
+          : new URL(decodedUrl, baseUrl).href;
+
         if (urlMapping[absoluteUrl]) {
+          console.log(
+            `  → Rewriting relative URL: ${relUrl} -> ${urlMapping[absoluteUrl]}`
+          );
           return `${attr}="${urlMapping[absoluteUrl]}"`;
         }
       } catch (e) {
         // Keep original if URL construction fails
       }
       return match;
+    }
+  );
+
+  // Handle srcset attributes for responsive images
+  rewritten = rewritten.replace(
+    /srcset=["']([^"']+)["']/gi,
+    (match, srcset) => {
+      const rewrittenSrcset = srcset
+        .split(",")
+        .map((entry) => {
+          const trimmedEntry = entry.trim();
+          // Extract URL and descriptor (like 640w or 2x)
+          const parts = trimmedEntry.split(/\s+/);
+          if (parts.length === 0) return trimmedEntry;
+
+          const url = parts[0];
+          const descriptor = parts.slice(1).join(" ");
+
+          // Try to resolve and map the URL
+          try {
+            // Decode HTML entities first
+            const decodedUrl = url
+              .replace(/&amp;/g, "&")
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/&lt;/g, "<")
+              .replace(/&gt;/g, ">");
+
+            let absoluteUrl;
+            if (decodedUrl.startsWith("http") || decodedUrl.startsWith("//")) {
+              absoluteUrl = decodedUrl.startsWith("//")
+                ? `https:${decodedUrl}`
+                : decodedUrl;
+            } else if (decodedUrl.startsWith("/")) {
+              // Handle root-relative URLs
+              absoluteUrl = new URL(decodedUrl, origin).href;
+            } else {
+              absoluteUrl = new URL(decodedUrl, baseUrl).href;
+            }
+
+            if (urlMapping[absoluteUrl]) {
+              return descriptor
+                ? `${urlMapping[absoluteUrl]} ${descriptor}`
+                : urlMapping[absoluteUrl];
+            }
+          } catch (e) {
+            // Keep original on error
+          }
+          return trimmedEntry;
+        })
+        .join(", ");
+
+      return `srcset="${rewrittenSrcset}"`;
     }
   );
 
@@ -270,21 +375,78 @@ async function cachePage(url, options = {}) {
       }
     });
 
+    // Also capture requests to see what's being asked for
+    page.on("request", (request) => {
+      const url = request.url();
+      // Log image requests
+      if (
+        url.match(/\.(png|jpg|jpeg|svg|webp|gif|ico)$/i) ||
+        url.includes("/_next/image") ||
+        url.includes("/logo") ||
+        url.includes("/floor") ||
+        url.includes("/venue") ||
+        url.includes("/overvie") ||
+        url.includes("favicon")
+      ) {
+        console.log(`  → Image request: ${url}`);
+      }
+    });
+
     // Intercept all network requests
     page.on("response", async (response) => {
       try {
         const responseUrl = response.url();
-        const contentType = response.headers()["content-type"];
+        const contentType = response.headers()["content-type"] || "";
         const status = response.status();
 
         // Skip failed requests
-        if (status >= 400) return;
+        if (status >= 400) {
+          console.log(
+            `  ⚠ Skipping failed request (${status}): ${responseUrl}`
+          );
+          return;
+        }
 
         // Skip data URLs and blob URLs
         if (responseUrl.startsWith("data:") || responseUrl.startsWith("blob:"))
           return;
 
+        // Always capture image-like responses
+        const isImageUrl =
+          responseUrl.match(/\.(png|jpg|jpeg|svg|webp|gif|ico)$/i) ||
+          responseUrl.includes("/_next/image") ||
+          responseUrl.includes("/logo") ||
+          responseUrl.includes("/floor") ||
+          responseUrl.includes("/venue") ||
+          responseUrl.includes("/overvie") ||
+          contentType.includes("image");
+
+        // Log Next.js image requests specifically
+        if (
+          responseUrl.includes("/_next/image") ||
+          responseUrl.includes("_next/image")
+        ) {
+          console.log(`  → Found Next.js image: ${responseUrl}`);
+        }
+
+        // Log SVG/PNG captures
+        if (responseUrl.match(/\.(svg|png)$/i)) {
+          console.log(
+            `  → Found ${
+              responseUrl.endsWith(".svg") ? "SVG" : "PNG"
+            }: ${responseUrl}`
+          );
+        }
+
         pageResources.push({ url: responseUrl, contentType, response });
+
+        if (isImageUrl) {
+          console.log(
+            `  → Captured image response: ${responseUrl} (${
+              contentType || "no content-type"
+            })`
+          );
+        }
       } catch (err) {
         console.error(`Error intercepting response: ${err.message}`);
       }
@@ -316,6 +478,7 @@ async function cachePage(url, options = {}) {
       let lastHeight = 0;
       let scrollAttempts = 0;
       const maxScrollAttempts = 20; // Additional safety limit
+      let totalAssetsBeforeScroll = pageResources.length;
 
       while (scrollAttempts < maxScrollAttempts) {
         // Check if page is still open before scrolling
@@ -346,26 +509,54 @@ async function cachePage(url, options = {}) {
 
           lastHeight = documentHeight;
 
-          // Scroll down by half viewport height
-          currentScrollPosition += viewportHeight * 0.5;
+          // Scroll down by one full viewport height (was 0.5)
+          currentScrollPosition += viewportHeight * 1.0;
           const scrollTarget = Math.min(
             currentScrollPosition,
             documentHeight,
             maxScrollHeight
           );
 
+          // Use instant scroll for more reliable positioning
           await page.evaluate((scrollY) => {
-            window.scrollTo({ top: scrollY, behavior: "smooth" });
+            window.scrollTo({ top: scrollY, behavior: "instant" });
           }, scrollTarget);
 
-          // Wait for content to load
-          await page.waitForTimeout(500);
+          // Wait longer for content to actually appear
+          await page.waitForTimeout(1000);
+
+          // Force any lazy-loaded images to start loading by checking viewport
+          await page.evaluate(() => {
+            // Find all images and trigger intersection observer
+            const images = document.querySelectorAll(
+              'img[loading="lazy"], img[data-src]'
+            );
+            images.forEach((img) => {
+              if (img.getBoundingClientRect().top < window.innerHeight * 2) {
+                // Trigger lazy loading by setting src if needed
+                if (img.dataset.src && !img.src) {
+                  img.src = img.dataset.src;
+                }
+              }
+            });
+          });
 
           // Check for any pending network requests
           try {
-            await page.waitForLoadState("networkidle", { timeout: 1000 });
+            await page.waitForLoadState("networkidle", { timeout: 2000 });
           } catch (e) {
             // Continue even if network isn't completely idle
+          }
+
+          // Log progress
+          const newAssets = pageResources.length - totalAssetsBeforeScroll;
+          if (newAssets > 0) {
+            console.log(
+              `  → Found ${newAssets} new assets after scroll ${
+                scrollAttempts + 1
+              }`
+            );
+            totalAssetsBeforeScroll = pageResources.length;
           }
 
           scrollAttempts++;
@@ -402,8 +593,109 @@ async function cachePage(url, options = {}) {
         throw new Error("Page closed before content could be extracted");
       }
 
+      // Force load all images that might not have loaded
+      console.log(`  → Force loading all images...`);
+      const forcedImageUrls = await page.evaluate(() => {
+        const images = [];
+
+        // Find all img tags and get their sources
+        document.querySelectorAll("img").forEach((img) => {
+          if (img.src) {
+            images.push(img.src);
+          }
+
+          // Also check srcset
+          if (img.srcset) {
+            const srcsetUrls = img.srcset
+              .split(",")
+              .map((entry) => entry.trim().split(" ")[0]);
+            srcsetUrls.forEach((url) => {
+              if (url) images.push(url);
+            });
+          }
+        });
+
+        // Also look for direct image references in the HTML that might not be in img tags yet
+        const htmlContent = document.documentElement.innerHTML;
+        const imagePatterns = [
+          /src="([^"]*\.(svg|png|jpg|jpeg|webp))"/gi,
+          /\/overvie[^"'\s]*/g,
+          /\/venue[^"'\s]*/g,
+          /\/floor[^"'\s]*/g,
+          /\/logo\.png/g,
+        ];
+
+        imagePatterns.forEach((pattern) => {
+          const matches = [...htmlContent.matchAll(pattern)];
+          matches.forEach((match) => {
+            const url = match[1] || match[0];
+            if (url && !url.startsWith("data:")) {
+              try {
+                const absoluteUrl = new URL(url, window.location.href).href;
+                images.push(absoluteUrl);
+              } catch (e) {
+                // If not a valid URL, add as-is
+                images.push(url);
+              }
+            }
+          });
+        });
+
+        return [...new Set(images)];
+      });
+
+      console.log(`  → Found ${forcedImageUrls.length} image URLs in page`);
+      forcedImageUrls.slice(0, 10).forEach((url) => {
+        console.log(`    - ${url}`);
+      });
+      if (forcedImageUrls.length > 10) {
+        console.log(`    ... and ${forcedImageUrls.length - 10} more`);
+      }
+
+      // Navigate to each image URL to ensure it's captured
+      console.log(`  → Fetching uncaptured images...`);
+      for (const imageUrl of forcedImageUrls) {
+        // Skip if already captured
+        if (pageResources.some((r) => r.url === imageUrl)) continue;
+
+        // Skip data URLs
+        if (imageUrl.startsWith("data:")) continue;
+
+        try {
+          // Use page.evaluate to fetch the image
+          await page.evaluate(async (url) => {
+            try {
+              await fetch(url);
+            } catch (e) {
+              // Ignore fetch errors
+            }
+          }, imageUrl);
+        } catch (e) {
+          // Ignore errors
+        }
+      }
+
+      // Wait for any new resources to be captured
+      await page.waitForTimeout(1000);
+
       // Get the rendered HTML
       const html = await page.content();
+
+      // Debug: Log all captured resources
+      console.log(`  → Total resources captured: ${pageResources.length}`);
+      const imageResources = pageResources.filter(
+        (r) =>
+          r.url.match(/\.(png|jpg|jpeg|svg|webp|gif|ico)$/i) ||
+          r.url.includes("/_next/image") ||
+          r.url.includes("/logo") ||
+          (r.contentType && r.contentType.includes("image"))
+      );
+      console.log(`  → Image resources found: ${imageResources.length}`);
+      imageResources.forEach((img) => {
+        console.log(
+          `    - ${img.url} (${img.contentType || "no content-type"})`
+        );
+      });
 
       // Extract same-origin links if we haven't reached max depth
       if (depth < maxDepth) {
@@ -418,13 +710,41 @@ async function cachePage(url, options = {}) {
       // Save all intercepted resources
       console.log(`  → Saving ${pageResources.length} resources...`);
       let savedCount = 0;
+      let imagesSaved = 0;
+      let imagesFailed = 0;
+
       for (const { url: resourceUrl, contentType, response } of pageResources) {
-        if (savedAssets.has(resourceUrl)) continue;
+        if (savedAssets.has(resourceUrl)) {
+          console.log(`  → Skipping duplicate: ${resourceUrl}`);
+          continue;
+        }
+
+        const isImage =
+          resourceUrl.match(/\.(png|jpg|jpeg|svg|webp|gif|ico)$/i) ||
+          resourceUrl.includes("/_next/image") ||
+          resourceUrl.includes("/logo") ||
+          (contentType && contentType.includes("image"));
 
         try {
+          // Debug logging for images
+          if (isImage) {
+            console.log(`  → 🖼️ Processing image: ${resourceUrl}`);
+            console.log(`    - Content-Type: ${contentType || "none"}`);
+          }
+
           const buffer = await response.body();
+
+          if (isImage) {
+            console.log(`    - Buffer size: ${buffer.length} bytes`);
+          }
+
           const category = getAssetCategory(contentType, resourceUrl);
           const ext = getFileExtension(contentType, resourceUrl);
+
+          if (isImage) {
+            console.log(`    - Category: ${category}, Extension: ${ext}`);
+          }
+
           const resourceHash = crypto
             .createHash("md5")
             .update(resourceUrl)
@@ -447,20 +767,68 @@ async function cachePage(url, options = {}) {
             size: buffer.length,
           });
           savedCount++;
+
+          if (isImage) {
+            imagesSaved++;
+            console.log(`    ✅ Image saved successfully!`);
+            console.log(`    - Local path: ${relativePath}`);
+            console.log(`    - URL mapping: ${resourceUrl} -> ${relativePath}`);
+          }
+
+          // Log PNG and image saves specifically
+          if (resourceUrl.includes(".png") || category === "images") {
+            console.log(
+              `  → Saved image: ${resourceUrl} (${ext}, ${buffer.length} bytes)`
+            );
+          }
+
           if (savedCount % 10 === 0) {
             console.log(
               `  → Saved ${savedCount}/${pageResources.length} assets...`
             );
           }
         } catch (err) {
+          if (isImage) {
+            imagesFailed++;
+            console.error(`    ❌ Failed to save image!`);
+          }
           console.warn(
             `  ⚠ Failed to save resource ${resourceUrl}: ${err.message}`
           );
         }
       }
       console.log(`  → Saved ${savedCount} assets total`);
+      console.log(`  → Images: ${imagesSaved} saved, ${imagesFailed} failed`);
+
+      // Debug: Check for logo.png in HTML before rewriting
+      const logoMatches = html.match(/logo\.png/gi);
+      if (logoMatches) {
+        console.log(
+          `  → Found ${logoMatches.length} references to logo.png in HTML`
+        );
+      }
+
+      // Check all image sources in HTML
+      const imgSrcs = html.match(/(?:src|srcset)=["']([^"']+)["']/gi);
+      if (imgSrcs) {
+        console.log(
+          `  → Found ${imgSrcs.length} src/srcset attributes in HTML`
+        );
+        const imageUrls = imgSrcs.filter(
+          (src) =>
+            src.match(/\.(png|jpg|jpeg|svg|webp|gif|ico)/i) ||
+            src.includes("/_next/image") ||
+            src.includes("/logo")
+        );
+        console.log(`  → ${imageUrls.length} appear to be image URLs`);
+      }
 
       // Rewrite HTML URLs
+      console.log(
+        `  → Starting HTML rewriting with ${
+          Object.keys(urlMapping).length
+        } URL mappings`
+      );
       let rewrittenHtml = rewriteHtmlUrls(html, pageUrl, urlMapping, cacheHash);
 
       // Rewrite CSS URLs in style tags
@@ -471,6 +839,25 @@ async function cachePage(url, options = {}) {
           return match.replace(css, rewrittenCss);
         }
       );
+
+      // Debug: Check if rewriting worked for images
+      const rewrittenLogoMatches = rewrittenHtml.match(/logo\.png/gi);
+      const rewrittenAssetPaths = rewrittenHtml.match(/\.\/assets\/[^"'\s]+/g);
+      console.log(`  → After rewriting:`);
+      if (rewrittenLogoMatches) {
+        console.log(
+          `    - Still ${rewrittenLogoMatches.length} references to logo.png`
+        );
+      }
+      if (rewrittenAssetPaths) {
+        console.log(
+          `    - ${rewrittenAssetPaths.length} references to local assets`
+        );
+        const imageAssets = rewrittenAssetPaths.filter((p) =>
+          p.includes("/images/")
+        );
+        console.log(`    - ${imageAssets.length} are in images directory`);
+      }
 
       // Add offline indicator banner
       const offlineBanner = `
@@ -504,6 +891,16 @@ async function cachePage(url, options = {}) {
       );
       await fs.writeFile(htmlPath, rewrittenHtml);
 
+      // Verify the file was actually written
+      try {
+        const stats = await fs.stat(htmlPath);
+        console.log(
+          `  → Verified HTML saved: ${htmlFileName} (${stats.size} bytes)`
+        );
+      } catch (verifyErr) {
+        console.error(`  ⚠ Failed to verify HTML file: ${verifyErr.message}`);
+      }
+
       manifest.pages.push({
         url: pageUrl,
         local_path:
@@ -519,9 +916,21 @@ async function cachePage(url, options = {}) {
       if (err.message.includes("timeout")) {
         console.error(`  Timeout error - site may be too slow or blocking`);
       }
+      // Mark as failed but continue with other pages
+      manifest.errors = manifest.errors || [];
+      manifest.errors.push({
+        url: pageUrl,
+        error: err.message,
+      });
     } finally {
       await page.close();
     }
+  }
+
+  // Check if we actually cached anything
+  if (manifest.pages.length === 0) {
+    await browser.close();
+    throw new Error("Failed to cache any pages - no content was saved");
   }
 
   // Save manifest
@@ -533,7 +942,7 @@ async function cachePage(url, options = {}) {
   await browser.close();
 
   return {
-    success: true,
+    success: manifest.pages.length > 0,
     cacheHash,
     url: normalizedUrl,
     manifest,

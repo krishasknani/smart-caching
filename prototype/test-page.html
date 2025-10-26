@@ -405,7 +405,7 @@
 
           const result = await response.json();
 
-          if (result.success) {
+          if (result.success && result.stats && result.stats.pages > 0) {
             currentCacheHash = result.cacheHash;
             showStatus(
               `Successfully cached! You can now view it offline.`,
@@ -414,7 +414,17 @@
             );
             viewBtn.disabled = false;
           } else {
-            showStatus(`Error: ${result.error}`, "error");
+            // Show error with details
+            const errorMsg =
+              result.error || "Failed to cache - no content was saved";
+            showStatus(`Error: ${errorMsg}`, "error");
+
+            // Log to console for debugging
+            console.error("Cache failed:", result);
+
+            // Reset cache hash
+            currentCacheHash = null;
+            viewBtn.disabled = true;
           }
         } catch (error) {
           showStatus(`Network error: ${error.message}`, "error");
