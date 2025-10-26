@@ -85,9 +85,9 @@ async function loadConfig() {
 		}
 
 		console.log("Configuration loaded successfully:", {
-			hasApiKey: !!CONFIG.BASETEN_API_KEY,
-			apiUrl: CONFIG.BASETEN_API_URL,
-			model: CONFIG.BASETEN_MODEL,
+			hasApiKey: !!CONFIG.CLAUDE_API_KEY,
+			apiUrl: CONFIG.CLAUDE_API_URL,
+			model: CONFIG.CLAUDE_MODEL,
 			cacheDuration: CONFIG.CACHE_DURATION_HOURS,
 		});
 		return true;
@@ -103,21 +103,21 @@ function extractConfigFromText(configText) {
 		const config = {};
 
 		// Extract API key
-		const apiKeyMatch = configText.match(/BASETEN_API_KEY:\s*"([^"]+)"/);
+		const apiKeyMatch = configText.match(/CLAUDE_API_KEY:\s*"([^"]+)"/);
 		if (apiKeyMatch) {
-			config.BASETEN_API_KEY = apiKeyMatch[1];
+			config.CLAUDE_API_KEY = apiKeyMatch[1];
 		}
 
 		// Extract API URL
-		const apiUrlMatch = configText.match(/BASETEN_API_URL:\s*"([^"]+)"/);
+		const apiUrlMatch = configText.match(/CLAUDE_API_URL:\s*"([^"]+)"/);
 		if (apiUrlMatch) {
-			config.BASETEN_API_URL = apiUrlMatch[1];
+			config.CLAUDE_API_URL = apiUrlMatch[1];
 		}
 
 		// Extract model
-		const modelMatch = configText.match(/BASETEN_MODEL:\s*"([^"]+)"/);
+		const modelMatch = configText.match(/CLAUDE_MODEL:\s*"([^"]+)"/);
 		if (modelMatch) {
-			config.BASETEN_MODEL = modelMatch[1];
+			config.CLAUDE_MODEL = modelMatch[1];
 		}
 
 		// Extract cache duration
@@ -169,10 +169,10 @@ function extractConfigFromText(configText) {
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-	if (request.action === "analyzeWithBaseten") {
+	if (request.action === "analyzeWithClaude") {
 		// Ensure config is loaded before processing
 		ensureConfigLoaded()
-			.then(() => handleBasetenAnalysis(request.data))
+			.then(() => handleClaudeAnalysis(request.data))
 			.then((result) => sendResponse({ success: true, data: result }))
 			.catch((error) => sendResponse({ success: false, error: error.message }));
 		return true; // Keep message channel open for async response
@@ -224,301 +224,152 @@ chrome.runtime.onStartup.addListener(() => {
 	loadConfig();
 });
 
-// Create prompt for URL clustering
-function createAnalysisPrompt(data) {
+// Create Claude prompt for URL clustering
+function createClaudePrompt(data) {
 	// Extract URLs from history and tabs, but limit and clean them
 	const historyUrls = data.browser_history
 		.map((item) => item.url)
 		.filter((url) => url && url.length < 200) // Filter out very long URLs
-		.slice(0, 30); // Reduced from 50 to 30
+		.slice(0, 50); // Limit to first 50 for prompt length
 
 	const tabUrls = data.current_tabs
 		.map((tab) => tab.url)
-		.filter((url) => url && url.length < 200) // Filter out very long URLs
-		.slice(0, 20); // Limit tabs too
+		.filter((url) => url && url.length < 200); // Filter out very long URLs
 
 	return `Analyze the following browser history and current tabs. Group the URLs into relevant categories/topics based on their content and purpose.
 
-BROWSER HISTORY URLs (${data.total_history_items} total, showing first ${
-		historyUrls.length
-	}):
+BROWSER HISTORY URLs (${data.total_history_items} total, showing first 50):
 ${historyUrls.join("\n")}
 
-CURRENT TABS URLs (${data.total_open_tabs} total, showing first ${
-		tabUrls.length
-	}):
+CURRENT TABS URLs (${data.total_open_tabs} total):
 ${tabUrls.join("\n")}
 
-Create 3-7 meaningful categories. For each category, include only 2-5 representative URLs (not all URLs).
-Focus on:
+Please return a JSON array of categories with the following structure:
+[
+  {
+    "category_name": "string",
+    "description": "string explaining what this category represents",
+    "urls": ["array of relevant URLs from the data"],
+    "confidence": 0.95,
+    "keywords": ["array of keywords that define this category"]
+  }
+]
+
+Focus on creating meaningful categories that reflect the user's interests and browsing patterns. Consider:
 - Website domains and purposes
 - Content themes and topics
-- User behavior patterns`;
+- User behavior patterns
+- Frequency of visits
+
+IMPORTANT: Return ONLY valid JSON. Do not include any markdown formatting, code blocks, or additional text.`;
 }
 
-// Define JSON schema for structured output
-function getCategoriesSchema() {
-	return {
-		type: "json_schema",
-		json_schema: {
-			name: "browsing_categories",
-			description:
-				"Categories of URLs from browser history and tabs (3-7 categories, 2-5 URLs each)",
-			schema: {
-				type: "object",
-				properties: {
-					categories: {
-						type: "array",
-						description:
-							"Array of 3-7 categorized URL groups with 2-5 representative URLs each",
-						items: {
-							type: "object",
-							properties: {
-								category_name: {
-									type: "string",
-									description: "Name of the category",
-								},
-								description: {
-									type: "string",
-									description:
-										"Brief description of what this category represents",
-								},
-								urls: {
-									type: "array",
-									description:
-										"2-5 representative URLs from the data for this category",
-									items: {
-										type: "string",
-									},
-								},
-								confidence: {
-									type: "number",
-									description: "Confidence score between 0 and 1",
-								},
-								keywords: {
-									type: "array",
-									description: "2-5 keywords that define this category",
-									items: {
-										type: "string",
-									},
-								},
-							},
-							required: [
-								"category_name",
-								"description",
-								"urls",
-								"confidence",
-								"keywords",
-							],
-							additionalProperties: false,
-						},
-					},
-				},
-				required: ["categories"],
-				additionalProperties: false,
-			},
-			strict: true,
-		},
-	};
-}
-
-// Call Baseten API to analyze data
-async function callBasetenAPI(data) {
+// Call Claude API to analyze data
+async function callClaudeAPI(data) {
 	try {
 		// Config should already be loaded by ensureConfigLoaded()
-		if (!CONFIG.BASETEN_API_KEY) {
-			throw new Error("Baseten API key not found in configuration.");
+		if (!CONFIG.CLAUDE_API_KEY) {
+			throw new Error("Claude API key not found in configuration.");
 		}
 
-		const prompt = createAnalysisPrompt(data);
+		const prompt = createClaudePrompt(data);
 
-		const response = await fetch(CONFIG.BASETEN_API_URL, {
+		const response = await fetch(CONFIG.CLAUDE_API_URL, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
-				Authorization: `Api-Key ${CONFIG.BASETEN_API_KEY}`,
+				"x-api-key": CONFIG.CLAUDE_API_KEY,
+				"anthropic-version": "2023-06-01",
+				"anthropic-dangerous-direct-browser-access": "true",
 			},
 			body: JSON.stringify({
-				model: CONFIG.BASETEN_MODEL,
+				model: CONFIG.CLAUDE_MODEL,
+				max_tokens: 4000,
 				messages: [
-					{
-						role: "system",
-						content:
-							"You are an expert at analyzing browsing patterns and categorizing URLs. Extract meaningful categories from browser history and tabs. Return JSON with a 'categories' array containing objects with category_name, description, urls (2-5 URLs), confidence (0-1), and keywords (2-5 keywords).",
-					},
 					{
 						role: "user",
 						content: prompt,
 					},
 				],
-				response_format: getCategoriesSchema(),
-				stream: false,
-				top_p: 1,
-				max_tokens: 8000,
-				temperature: 1,
-				presence_penalty: 0,
-				frequency_penalty: 0,
 			}),
 		});
 
 		if (!response.ok) {
-			const errorText = await response.text();
-			let errorData;
-			try {
-				errorData = JSON.parse(errorText);
-			} catch {
-				errorData = { error: { message: errorText } };
-			}
+			const errorData = await response.json();
 			throw new Error(
-				`Baseten API error: ${response.status} - ${
+				`Claude API error: ${response.status} - ${
 					errorData.error?.message || "Unknown error"
 				}`
 			);
 		}
 
-		const responseText = await response.text();
-		console.log("Raw API response:", responseText.substring(0, 500)); // Log first 500 chars
-
-		let result;
-		try {
-			result = JSON.parse(responseText);
-		} catch (parseError) {
-			console.error("Failed to parse API response:", parseError);
-			console.error("Response text:", responseText);
-			throw new Error(`Invalid JSON response from API: ${parseError.message}`);
-		}
-
-		if (!result.choices || !result.choices[0] || !result.choices[0].message) {
-			throw new Error("Invalid API response structure");
-		}
-
-		// Check if response was truncated due to token limit
-		if (result.choices[0].finish_reason === "length") {
-			console.warn("API response was truncated due to token limit");
-			throw new Error(
-				"Response was truncated. Try reducing the amount of data or increasing max_tokens."
-			);
-		}
-
-		const content = result.choices[0].message.content;
-		console.log("Content from API:", content.substring(0, 500)); // Log first 500 chars
-
-		// Parse the structured JSON response
-		let parsedContent;
-		try {
-			parsedContent = JSON.parse(content);
-		} catch (parseError) {
-			console.error("Failed to parse content JSON:", parseError);
-			console.error("Content:", content);
-			throw new Error(`Invalid JSON in content field: ${parseError.message}`);
-		}
-
-		console.log("Parsed content:", parsedContent);
-
-		// Extract the categories - handle both array and object formats
-		let categories = parsedContent.categories || [];
-
-		// If no categories array, check if the entire object is the categories
-		if (
-			categories.length === 0 &&
-			parsedContent &&
-			typeof parsedContent === "object"
-		) {
-			// Check if parsedContent itself contains category-like objects
-			const potentialCategories = Object.entries(parsedContent).filter(
-				([key, value]) => {
-					return (
-						key !== "categories" &&
-						typeof value === "object" &&
-						(value.description || value.representative_urls || value.urls)
-					);
-				}
-			);
-
-			if (potentialCategories.length > 0) {
-				console.log(
-					"Converting object format to categories array:",
-					potentialCategories.length,
-					"categories found"
-				);
-				categories = potentialCategories;
-			}
-		}
-
-		// Convert categories to array format if needed
-		if (Array.isArray(categories) && categories.length > 0) {
-			// Check if it's already in the right format or needs conversion
-			const firstItem = categories[0];
-			if (Array.isArray(firstItem)) {
-				// It's an array of [key, value] pairs from Object.entries
-				categories = categories.map(([key, value]) => {
-					let urls = [];
-					let description = "";
-					let confidence = 0.9;
-					let keywords = [key.replace(/_/g, " ").toLowerCase()];
-
-					if (Array.isArray(value)) {
-						urls = value;
-						description = `Category: ${key.replace(/_/g, " ")}`;
-					} else if (typeof value === "object") {
-						description =
-							value.description || `Category: ${key.replace(/_/g, " ")}`;
-						urls =
-							value.representative_urls ||
-							value.example_urls ||
-							value.urls ||
-							[];
-						confidence = value.confidence || 0.9;
-						keywords = value.keywords || keywords;
-					}
-
-					return {
-						category_name: key.replace(/_/g, " "),
-						description,
-						urls,
-						confidence,
-						keywords,
-					};
-				});
-			}
-			// else: already in correct format
-		}
-
-		console.log("Final categories:", categories);
-
-		if (!categories || categories.length === 0) {
-			throw new Error(
-				"No categories generated. API response structure may be unexpected."
-			);
-		}
-
-		return categories;
+		const result = await response.json();
+		console.log("Claude API response:", result);
+		console.log("Claude response content:", result.content[0].text);
+		return result.content[0].text;
 	} catch (error) {
-		console.error("Error calling Baseten API:", error);
+		console.error("Error calling Claude API:", error);
 		throw error;
 	}
 }
 
-// Handle Baseten analysis request
-async function handleBasetenAnalysis(data) {
+// Handle Claude analysis request
+async function handleClaudeAnalysis(data) {
 	try {
-		// Call Baseten API - now returns parsed categories array directly
-		const categories = await callBasetenAPI(data);
+		console.log("Starting Claude analysis...");
 
-		// Validate categories
-		if (!Array.isArray(categories)) {
-			throw new Error("API did not return an array of categories");
+		// Call Claude API
+		const claudeResponse = await callClaudeAPI(data);
+
+		// Parse the JSON response
+		let categories;
+		try {
+			console.log("Raw Claude response text:", claudeResponse);
+			console.log("Attempting to parse as JSON...");
+
+			// Clean the response to extract JSON from markdown code blocks
+			let cleanResponse = claudeResponse.trim();
+
+			// Remove markdown code block markers if present
+			if (cleanResponse.startsWith("```json")) {
+				cleanResponse = cleanResponse.replace(/^```json\s*/, "");
+			}
+			if (cleanResponse.startsWith("```")) {
+				cleanResponse = cleanResponse.replace(/^```\s*/, "");
+			}
+			if (cleanResponse.endsWith("```")) {
+				cleanResponse = cleanResponse.replace(/\s*```$/, "");
+			}
+
+			// Additional cleaning for common JSON issues
+			cleanResponse = cleanResponse.trim();
+
+			// Try to find the JSON array if it's embedded in other text
+			const jsonMatch = cleanResponse.match(/\[[\s\S]*\]/);
+			if (jsonMatch) {
+				cleanResponse = jsonMatch[0];
+			}
+
+			console.log("Cleaned response:", cleanResponse);
+			categories = JSON.parse(cleanResponse);
+			console.log("Successfully parsed categories:", categories);
+		} catch (parseError) {
+			console.error("Error parsing Claude response:", parseError);
+			console.error("Raw response that failed to parse:", claudeResponse);
+			console.error("Parse error details:", parseError.message);
+			throw new Error("Failed to parse Claude response. Please try again.");
 		}
 
 		// Cache the results
 		await chrome.storage.local.set({
-			basetenCategories: categories,
-			basetenAnalysisTimestamp: Date.now(),
+			claudeCategories: categories,
+			claudeAnalysisTimestamp: Date.now(),
 		});
 
+		console.log("Claude analysis completed:", categories);
 		return categories;
 	} catch (error) {
-		console.error("Error in Baseten analysis:", error);
+		console.error("Error in Claude analysis:", error);
 		throw error;
 	}
 }
