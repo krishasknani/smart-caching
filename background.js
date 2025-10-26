@@ -319,8 +319,19 @@ async function cacheWithPlaywright(url, maxDepth = 0) {
     });
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || "Playwright cache failed");
+      let errorMessage = "Playwright cache failed";
+      try {
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } else {
+          errorMessage = `Server returned non-JSON response (status ${response.status})`;
+        }
+      } catch (parseError) {
+        errorMessage = `Server error (status ${response.status})`;
+      }
+      throw new Error(errorMessage);
     }
 
     const result = await response.json();
@@ -332,7 +343,10 @@ async function cacheWithPlaywright(url, maxDepth = 0) {
     );
 
     if (!contentResponse.ok) {
-      throw new Error("Failed to retrieve cached content");
+      console.log(
+        `ℹ️  ${url} - may have anti-bot protection, falling back to simple cache`
+      );
+      throw new Error("Site may have anti-bot protection");
     }
 
     const contentData = await contentResponse.json();
@@ -388,11 +402,33 @@ async function cacheWithPlaywrightBatch(urls, maxDepth = 0, concurrency = 3) {
     );
 
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error || "Playwright batch cache failed");
+      let errorMessage = "Playwright batch cache failed";
+      try {
+        // Try to parse as JSON
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } else {
+          // Got HTML or other non-JSON response
+          const text = await response.text();
+          errorMessage = `Server returned non-JSON response (status ${response.status})`;
+          console.log("Server response:", text.substring(0, 200));
+        }
+      } catch (parseError) {
+        errorMessage = `Server error (status ${response.status})`;
+      }
+      throw new Error(errorMessage);
     }
 
-    const batchResult = await response.json();
+    let batchResult;
+    try {
+      batchResult = await response.json();
+    } catch (parseError) {
+      const text = await response.text();
+      console.error("Failed to parse batch response:", text.substring(0, 500));
+      throw new Error("Server returned invalid JSON response");
+    }
     console.log(
       `✅ Batch cache completed: ${batchResult.successful}/${batchResult.totalUrls} successful`
     );
@@ -408,7 +444,9 @@ async function cacheWithPlaywrightBatch(urls, maxDepth = 0, concurrency = 3) {
         );
 
         if (!contentResponse.ok) {
-          console.error(`Failed to retrieve content for ${result.url}`);
+          console.log(
+            `ℹ️  Skipping ${result.url} - may have anti-bot protection`
+          );
           continue;
         }
 

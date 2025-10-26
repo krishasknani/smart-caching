@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Test Simple Cache</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        padding: 20px;
+        max-width: 800px;
+        margin: 0 auto;
+      }
+
+      h1 {
+        color: #2196f3;
+      }
+
+      .test-section {
+        margin: 20px 0;
+        padding: 20px;
+        border: 2px solid #ddd;
+        border-radius: 8px;
+        background: #f9f9f9;
+      }
+
+      button {
+        padding: 10px 20px;
+        margin: 5px;
+        background: #2196f3;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 16px;
+      }
+
+      button:hover {
+        background: #1976d2;
+      }
+
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+
+      .results {
+        background: #fff;
+        padding: 15px;
+        border-radius: 4px;
+        margin-top: 20px;
+        border: 1px solid #ddd;
+        max-height: 400px;
+        overflow-y: auto;
+        font-family: monospace;
+        white-space: pre-wrap;
+      }
+
+      .success {
+        color: green;
+      }
+      .error {
+        color: red;
+      }
+      .info {
+        color: blue;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🧪 Test Simple Cache for Problematic Sites</h1>
+
+    <div class="test-section">
+      <h2>Test Direct Chrome Extension Caching</h2>
+      <p>
+        This will send a message to the extension to cache pages using
+        forceSimple mode:
+      </p>
+
+      <button onclick="testSimpleCache('https://www.browserstack.com')">
+        Cache BrowserStack (Simple)
+      </button>
+
+      <button onclick="testSimpleCache('https://code.visualstudio.com')">
+        Cache VS Code (Simple)
+      </button>
+
+      <button onclick="testWithPlaywright('https://www.browserstack.com')">
+        Cache BrowserStack (Auto)
+      </button>
+
+      <button onclick="testWithPlaywright('https://code.visualstudio.com')">
+        Cache VS Code (Auto)
+      </button>
+    </div>
+
+    <div class="test-section">
+      <h2>Results</h2>
+      <div id="results" class="results">Click a button to test caching...</div>
+    </div>
+
+    <script>
+      const resultsDiv = document.getElementById("results");
+
+      function log(message, type = "info") {
+        const timestamp = new Date().toLocaleTimeString();
+        const colorClass =
+          type === "error" ? "error" : type === "success" ? "success" : "info";
+        resultsDiv.innerHTML += `<span class="${colorClass}">[${timestamp}] ${message}</span>\n`;
+        resultsDiv.scrollTop = resultsDiv.scrollHeight;
+      }
+
+      async function testSimpleCache(url) {
+        log(`\n========================================`, "info");
+        log(`Testing simple cache for: ${url}`, "info");
+        log(`Force simple mode: YES`, "info");
+
+        // Check if extension is installed
+        if (!chrome?.runtime?.sendMessage) {
+          log(
+            "❌ Chrome extension API not available. Make sure the extension is installed.",
+            "error"
+          );
+          return;
+        }
+
+        try {
+          chrome.runtime.sendMessage(
+            "YOUR_EXTENSION_ID", // Will be auto-filled by Chrome
+            {
+              action: "getPageContent",
+              url: url,
+              maxDepth: 0,
+              forceSimple: true,
+            },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                log(
+                  `❌ Runtime error: ${chrome.runtime.lastError.message}`,
+                  "error"
+                );
+                // If extension ID is wrong, try without it
+                testWithoutId(url, true);
+                return;
+              }
+
+              if (response?.success) {
+                log(
+                  `✅ Successfully cached with ${response.method} method!`,
+                  "success"
+                );
+                if (response.stats) {
+                  log(`   Pages: ${response.stats.pages || 0}`, "success");
+                  log(`   Assets: ${response.stats.assets || 0}`, "success");
+                }
+              } else {
+                log(
+                  `❌ Failed to cache: ${response?.error || "Unknown error"}`,
+                  "error"
+                );
+              }
+            }
+          );
+        } catch (error) {
+          log(`❌ Exception: ${error.message}`, "error");
+        }
+      }
+
+      async function testWithPlaywright(url) {
+        log(`\n========================================`, "info");
+        log(`Testing auto cache for: ${url}`, "info");
+        log(`Force simple mode: NO (will try Playwright first)`, "info");
+
+        testWithoutId(url, false);
+      }
+
+      function testWithoutId(url, forceSimple) {
+        // Try sending message without extension ID (works if page is opened by extension)
+        try {
+          chrome.runtime.sendMessage(
+            {
+              action: "getPageContent",
+              url: url,
+              maxDepth: 0,
+              forceSimple: forceSimple,
+            },
+            (response) => {
+              if (chrome.runtime.lastError) {
+                log(
+                  `❌ Runtime error: ${chrome.runtime.lastError.message}`,
+                  "error"
+                );
+                log(
+                  `💡 Tip: Make sure to open this test page from the extension or use the correct extension ID`,
+                  "info"
+                );
+                return;
+              }
+
+              if (response?.success) {
+                log(
+                  `✅ Successfully cached with ${response.method} method!`,
+                  "success"
+                );
+                if (response.stats) {
+                  log(`   Pages: ${response.stats.pages || 0}`, "success");
+                  log(`   Assets: ${response.stats.assets || 0}`, "success");
+                }
+              } else {
+                log(
+                  `❌ Failed to cache: ${response?.error || "Unknown error"}`,
+                  "error"
+                );
+              }
+            }
+          );
+        } catch (error) {
+          log(`❌ Exception: ${error.message}`, "error");
+          log(
+            `💡 This test page must be opened from the Chrome extension to work properly.`,
+            "info"
+          );
+        }
+      }
+
+      // Initial message
+      log("Ready to test caching methods...", "info");
+      log(
+        "Note: This page should be opened from the Chrome extension for tests to work.",
+        "info"
+      );
+    </script>
+  </body>
+</html>

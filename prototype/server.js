@@ -396,6 +396,28 @@ async function cachePage(url, options = {}) {
   const cachedPages = new Set();
   const rawPageData = []; // Store raw HTML data for second-pass rewriting
 
+  // Check for known problematic sites that block automation
+  const problematicDomains = [
+    "browserstack.com",
+    "code.visualstudio.com",
+    "visualstudio.com",
+    "claude.ai",
+    "anthropic.com",
+    "stackoverflow.com",
+  ];
+
+  const urlDomain = new URL(normalizedUrl).hostname;
+  const isProblematicSite = problematicDomains.some((domain) =>
+    urlDomain.includes(domain)
+  );
+
+  if (isProblematicSite) {
+    console.warn(`⚠️  ${urlDomain} is known to have anti-bot protection.`);
+    console.warn(
+      `    Consider using simple HTML caching from the Chrome extension instead.`
+    );
+  }
+
   while (pagesToCache.length > 0) {
     const { url: pageUrl, depth } = pagesToCache.shift();
 
@@ -561,9 +583,12 @@ async function cachePage(url, options = {}) {
 
       let response;
       try {
+        // Use shorter timeout for known problematic sites to fail faster
+        const navigationTimeout = isProblematicSite ? 15000 : 60000;
+
         response = await page.goto(pageUrl, {
           waitUntil: "networkidle",
-          timeout: 60000,
+          timeout: navigationTimeout,
         });
       } catch (navError) {
         console.error(`  ❌ Navigation error: ${navError.message}`);
@@ -1067,6 +1092,16 @@ async function cachePage(url, options = {}) {
   // Check if we actually cached anything
   if (manifest.pages.length === 0) {
     await browser.close();
+
+    if (isProblematicSite) {
+      console.log(
+        `ℹ️  ${urlDomain} has anti-bot protection - skipping Playwright cache`
+      );
+      throw new Error(
+        "Site has anti-bot protection - use simple HTML caching instead"
+      );
+    }
+
     throw new Error("Failed to cache any pages - no content was saved");
   }
 
@@ -1449,11 +1484,21 @@ app.post("/api/cache/batch", async (req, res) => {
           );
           return result;
         } catch (error) {
-          console.error(
-            `[${globalIndex + 1}/${urls.length}] ❌ Failed: ${url} - ${
-              error.message
-            }`
-          );
+          // Check if it's an anti-bot protection error
+          if (error.message.includes("anti-bot protection")) {
+            console.log(
+              `[${globalIndex + 1}/${
+                urls.length
+              }] ℹ️  Skipping ${url} - has anti-bot protection`
+            );
+          } else {
+            console.error(
+              `[${globalIndex + 1}/${urls.length}] ❌ Failed: ${url} - ${
+                error.message
+              }`
+            );
+          }
+
           errors.push({
             url,
             success: false,
@@ -1514,9 +1559,14 @@ app.get("/api/content/:hash", async (req, res) => {
         url: manifest.url,
       });
     } catch (err) {
+      // Just log instead of returning error - this is expected for problematic sites
+      console.log(
+        `ℹ️  Cache not found for hash ${hash} - site may have anti-bot protection`
+      );
+
       res.status(404).json({
         success: false,
-        error: "Cached content not found",
+        error: "Cache not available - site may have anti-bot protection",
       });
     }
   } catch (error) {
