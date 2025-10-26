@@ -157,6 +157,28 @@ function extractConfigFromText(configText) {
 			config.SERP_RESULTS_PER_QUERY = parseInt(serpCountMatch[1]);
 		}
 
+		// Extract Playwright configuration
+		const playwrightEnabledMatch = configText.match(
+			/PLAYWRIGHT_ENABLED:\s*(true|false)/
+		);
+		if (playwrightEnabledMatch) {
+			config.PLAYWRIGHT_ENABLED = playwrightEnabledMatch[1] === "true";
+		}
+
+		const playwrightUrlMatch = configText.match(
+			/PLAYWRIGHT_SERVER_URL:\s*"([^"]+)"/
+		);
+		if (playwrightUrlMatch) {
+			config.PLAYWRIGHT_SERVER_URL = playwrightUrlMatch[1];
+		}
+
+		const playwrightTimeoutMatch = configText.match(
+			/PLAYWRIGHT_TIMEOUT:\s*(\d+)/
+		);
+		if (playwrightTimeoutMatch) {
+			config.PLAYWRIGHT_TIMEOUT = parseInt(playwrightTimeoutMatch[1]);
+		}
+
 		return config;
 	} catch (error) {
 		console.error("Error extracting config from text:", error);
