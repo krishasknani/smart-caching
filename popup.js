@@ -95,23 +95,38 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
       }
       
-      cachedPagesList.innerHTML = cachedPages.map(page => `
-        <div class="cached-page">
+      // Clear the list first
+      cachedPagesList.innerHTML = '';
+      
+      // Create each cached page element
+      cachedPages.forEach((page, index) => {
+        const pageElement = document.createElement('div');
+        pageElement.className = 'cached-page';
+        pageElement.innerHTML = `
           <div class="page-info">
             <div class="page-title">${escapeHtml(page.title)}</div>
             <div class="page-url">${escapeHtml(page.url)}</div>
           </div>
-          <button class="view-button" onclick="viewCachedPage('${page.url}')">View</button>
-          <button class="delete-button" onclick="deleteCachedPage('${page.url}')">Delete</button>
-        </div>
-      `).join('');
+          <button class="view-button" data-url="${escapeHtml(page.url)}">View</button>
+          <button class="delete-button" data-url="${escapeHtml(page.url)}">Delete</button>
+        `;
+        
+        // Add event listeners
+        const viewButton = pageElement.querySelector('.view-button');
+        const deleteButton = pageElement.querySelector('.delete-button');
+        
+        viewButton.addEventListener('click', () => viewCachedPage(page.url));
+        deleteButton.addEventListener('click', () => deleteCachedPage(page.url));
+        
+        cachedPagesList.appendChild(pageElement);
+      });
     } catch (error) {
       console.error('Error loading cached pages:', error);
     }
   }
   
-  // Global functions for button clicks
-  window.viewCachedPage = async function(url) {
+  // Functions for button clicks
+  async function viewCachedPage(url) {
     try {
       const cachedPages = await getCachedPages();
       const page = cachedPages.find(p => p.url === url);
@@ -126,9 +141,9 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (error) {
       console.error('Error viewing cached page:', error);
     }
-  };
+  }
   
-  window.deleteCachedPage = async function(url) {
+  async function deleteCachedPage(url) {
     try {
       const cachedPages = await getCachedPages();
       const filteredPages = cachedPages.filter(p => p.url !== url);
@@ -137,7 +152,7 @@ document.addEventListener('DOMContentLoaded', function() {
     } catch (error) {
       console.error('Error deleting cached page:', error);
     }
-  };
+  }
   
   function escapeHtml(text) {
     const div = document.createElement('div');
