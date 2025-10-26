@@ -1279,6 +1279,43 @@ async function cachePage(url, options = {}) {
     JSON.stringify(manifest, null, 2)
   );
 
+  // Validate the main index.html has been properly hydrated
+  const indexPath = path.join(cacheDir, "index.html");
+  try {
+    const indexContent = await fs.readFile(indexPath, "utf8");
+
+    // Check critical hydration elements
+    const validationChecks = {
+      hasContent: indexContent.length > 1000, // Should have substantial content
+      hasBaseTag: indexContent.includes("<base href"),
+      hasOfflineBanner: indexContent.includes("Cached Content"),
+      hasAssets: indexContent.includes("./assets/"),
+      noAbsoluteUrls:
+        !indexContent.match(/(?:href|src)="https?:\/\/[^"]+"/g) ||
+        indexContent.includes("./assets/"), // Either no absolute URLs or they're rewritten
+    };
+
+    const failedChecks = Object.entries(validationChecks)
+      .filter(([_, passed]) => !passed)
+      .map(([check, _]) => check);
+
+    if (failedChecks.length > 0) {
+      console.warn(
+        `⚠️  Page may not be properly hydrated. Failed checks: ${failedChecks.join(
+          ", "
+        )}`
+      );
+      // Don't throw error, just warn - some sites might legitimately fail some checks
+    }
+  } catch (err) {
+    console.warn(`⚠️  Could not validate hydration: ${err.message}`);
+  }
+
+  console.log(`\n✅ Caching complete!`);
+  console.log(`📁 Cache directory: ${cacheDir}`);
+  console.log(`📊 Total pages: ${manifest.pages.length}`);
+  console.log(`📊 Total assets: ${manifest.assets.length}`);
+
   return {
     success: manifest.pages.length > 0,
     cacheHash,
@@ -1358,6 +1395,99 @@ app.get("/api/check/:url", async (req, res) => {
       });
     }
   } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+// Batch cache endpoint - process multiple URLs in parallel
+app.post("/api/cache/batch", async (req, res) => {
+  try {
+    const { urls, maxDepth = 0, concurrency = 3 } = req.body;
+
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      return res.status(400).json({ error: "URLs array is required" });
+    }
+
+    console.log(`\n${"=".repeat(60)}`);
+    console.log(`Starting batch cache for ${urls.length} URLs`);
+    console.log(`Concurrency limit: ${concurrency}`);
+    console.log(`${"=".repeat(60)}\n`);
+
+    const results = [];
+    const errors = [];
+
+    // Process URLs in batches with concurrency limit
+    async function processBatch(batch, batchIndex) {
+      const batchPromises = batch.map(async (url, indexInBatch) => {
+        const globalIndex = batchIndex * concurrency + indexInBatch;
+        try {
+          // Add a small stagger to prevent all browsers launching at once
+          if (indexInBatch > 0) {
+            await new Promise((resolve) =>
+              setTimeout(resolve, indexInBatch * 500)
+            );
+          }
+
+          console.log(`[${globalIndex + 1}/${urls.length}] Caching: ${url}`);
+          const result = await cachePage(url, { maxDepth });
+
+          results.push({
+            url,
+            success: true,
+            cacheHash: result.cacheHash,
+            stats: {
+              pages: result.manifest.pages.length,
+              assets: result.manifest.assets.length,
+            },
+          });
+
+          console.log(
+            `[${globalIndex + 1}/${urls.length}] ✅ Completed: ${url}`
+          );
+          return result;
+        } catch (error) {
+          console.error(
+            `[${globalIndex + 1}/${urls.length}] ❌ Failed: ${url} - ${
+              error.message
+            }`
+          );
+          errors.push({
+            url,
+            success: false,
+            error: error.message,
+          });
+          return null;
+        }
+      });
+
+      return Promise.all(batchPromises);
+    }
+
+    // Split URLs into batches based on concurrency
+    const batches = [];
+    for (let i = 0; i < urls.length; i += concurrency) {
+      batches.push(urls.slice(i, i + concurrency));
+    }
+
+    // Process each batch sequentially
+    for (let i = 0; i < batches.length; i++) {
+      await processBatch(batches[i], i);
+    }
+
+    res.json({
+      success: true,
+      message: `Cached ${results.length} out of ${urls.length} URLs`,
+      totalUrls: urls.length,
+      successful: results.length,
+      failed: errors.length,
+      results,
+      errors,
+    });
+  } catch (error) {
+    console.error("Batch caching error:", error);
     res.status(500).json({
       success: false,
       error: error.message,

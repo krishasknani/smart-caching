@@ -431,7 +431,7 @@ document.addEventListener("DOMContentLoaded", function () {
         {
           action: "getPageContent",
           url: tab.url,
-          maxDepth: 0, // Can make this configurable later
+          maxDepth: 2, // Can make this configurable later
           forceSimple: false,
         },
         (response) => {
