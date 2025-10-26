@@ -1,27 +1,18 @@
-// Background service worker
 chrome.runtime.onInstalled.addListener(async () => {
 	console.log("Cache-22 installed");
-	// Load config immediately on installation
 	await loadConfig();
 });
 
-// Handle extension icon click (optional)
-chrome.action.onClicked.addListener((tab) => {
-	// This is handled by the popup, but you could add additional logic here
-});
+chrome.action.onClicked.addListener((tab) => {});
 
-// Listen for tab updates to potentially update cache status
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 	if (changeInfo.status === "complete" && tab.url) {
-		// Could add logic here to automatically check if page should be cached
 		console.log("Tab updated:", tab.url);
 	}
 });
 
-// Listen for browser history changes to trigger auto-caching
 chrome.history.onVisited.addListener(async (historyItem) => {
 	try {
-		// Check if first analysis has been completed
 		const isFirstTime = await isFirstTimeAnalysis();
 		if (isFirstTime) {
 			console.log(
@@ -31,32 +22,25 @@ chrome.history.onVisited.addListener(async (historyItem) => {
 			return;
 		}
 
-		// Check if auto-caching is enabled
 		const autoCacheEnabled = await isAutoCachingEnabled();
 		if (!autoCacheEnabled) {
 			console.log("Auto-caching disabled, skipping:", historyItem.url);
 			return;
 		}
 
-		// Check if URL was recently analyzed
 		if (await isRecentlyAnalyzed(historyItem.url)) {
 			console.log("URL recently analyzed, skipping:", historyItem.url);
 			return;
 		}
 
-		// Trigger auto-caching for this URL
 		await autoAnalyzeAndCache(historyItem.url);
 	} catch (error) {
 		console.error("Error in history listener:", error);
 	}
 });
 
-// ===== CLAUDE API INTEGRATION =====
-
-// Load configuration
 let CONFIG = null;
 
-// Load config file
 async function loadConfig() {
 	try {
 		console.log("Attempting to load config.js...");
@@ -73,8 +57,6 @@ async function loadConfig() {
 		const configText = await response.text();
 		console.log("Config file content length:", configText.length);
 
-		// Use a more CSP-friendly approach - import the config as a module
-		// For now, let's use a simple regex to extract the values
 		CONFIG = extractConfigFromText(configText);
 
 		if (!CONFIG) {
@@ -94,90 +76,58 @@ async function loadConfig() {
 	}
 }
 
-// Extract config values using regex (CSP-safe)
 function extractConfigFromText(configText) {
 	try {
 		const config = {};
-
-		// Extract API key
 		const apiKeyMatch = configText.match(/CLAUDE_API_KEY:\s*"([^"]+)"/);
-		if (apiKeyMatch) {
-			config.CLAUDE_API_KEY = apiKeyMatch[1];
-		}
+		if (apiKeyMatch) config.CLAUDE_API_KEY = apiKeyMatch[1];
 
-		// Extract API URL
 		const apiUrlMatch = configText.match(/CLAUDE_API_URL:\s*"([^"]+)"/);
-		if (apiUrlMatch) {
-			config.CLAUDE_API_URL = apiUrlMatch[1];
-		}
+		if (apiUrlMatch) config.CLAUDE_API_URL = apiUrlMatch[1];
 
-		// Extract model
 		const modelMatch = configText.match(/CLAUDE_MODEL:\s*"([^"]+)"/);
-		if (modelMatch) {
-			config.CLAUDE_MODEL = modelMatch[1];
-		}
+		if (modelMatch) config.CLAUDE_MODEL = modelMatch[1];
 
-		// Extract cache duration
 		const cacheMatch = configText.match(/CACHE_DURATION_HOURS:\s*(\d+)/);
-		if (cacheMatch) {
-			config.CACHE_DURATION_HOURS = parseInt(cacheMatch[1]);
-		}
+		if (cacheMatch) config.CACHE_DURATION_HOURS = parseInt(cacheMatch[1]);
 
-		// Extract max history items
 		const historyMatch = configText.match(/MAX_HISTORY_ITEMS:\s*(\d+)/);
-		if (historyMatch) {
-			config.MAX_HISTORY_ITEMS = parseInt(historyMatch[1]);
-		}
+		if (historyMatch) config.MAX_HISTORY_ITEMS = parseInt(historyMatch[1]);
 
-		// Extract max tabs items
 		const tabsMatch = configText.match(/MAX_TABS_ITEMS:\s*(\d+)/);
-		if (tabsMatch) {
-			config.MAX_TABS_ITEMS = parseInt(tabsMatch[1]);
-		}
+		if (tabsMatch) config.MAX_TABS_ITEMS = parseInt(tabsMatch[1]);
 
-		// Extract Bright Data token
 		const brightDataTokenMatch = configText.match(
 			/BRIGHTDATA_TOKEN:\s*"([^"]+)"/
 		);
-		if (brightDataTokenMatch) {
-			config.BRIGHTDATA_TOKEN = brightDataTokenMatch[1];
-		}
+		if (brightDataTokenMatch) config.BRIGHTDATA_TOKEN = brightDataTokenMatch[1];
 
-		// Extract Bright Data zone
 		const brightDataZoneMatch = configText.match(
 			/BRIGHTDATA_ZONE:\s*"([^"]+)"/
 		);
-		if (brightDataZoneMatch) {
-			config.BRIGHTDATA_ZONE = brightDataZoneMatch[1];
-		}
+		if (brightDataZoneMatch) config.BRIGHTDATA_ZONE = brightDataZoneMatch[1];
 
-		// Optional: results per query for SERP
 		const serpCountMatch = configText.match(/SERP_RESULTS_PER_QUERY:\s*(\d+)/);
-		if (serpCountMatch) {
+		if (serpCountMatch)
 			config.SERP_RESULTS_PER_QUERY = parseInt(serpCountMatch[1]);
-		}
 
-		// Extract Playwright configuration
 		const playwrightEnabledMatch = configText.match(
 			/PLAYWRIGHT_ENABLED:\s*(true|false)/
 		);
-		if (playwrightEnabledMatch) {
+		if (playwrightEnabledMatch)
 			config.PLAYWRIGHT_ENABLED = playwrightEnabledMatch[1] === "true";
-		}
 
 		const playwrightUrlMatch = configText.match(
 			/PLAYWRIGHT_SERVER_URL:\s*"([^"]+)"/
 		);
-		if (playwrightUrlMatch) {
+		if (playwrightUrlMatch)
 			config.PLAYWRIGHT_SERVER_URL = playwrightUrlMatch[1];
-		}
 
 		const playwrightTimeoutMatch = configText.match(
 			/PLAYWRIGHT_TIMEOUT:\s*(\d+)/
 		);
-		if (playwrightTimeoutMatch) {
+		if (playwrightTimeoutMatch)
 			config.PLAYWRIGHT_TIMEOUT = parseInt(playwrightTimeoutMatch[1]);
-		}
 
 		return config;
 	} catch (error) {
@@ -186,18 +136,33 @@ function extractConfigFromText(configText) {
 	}
 }
 
-// Listen for messages from popup
+async function ensureConfigLoaded() {
+	try {
+		if (CONFIG && typeof CONFIG === "object") return true;
+		const ok = await loadConfig();
+		if (ok && CONFIG) return true;
+	} catch (e) {
+		console.warn("ensureConfigLoaded error:", e);
+	}
+	throw new Error("Configuration not loaded");
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+	if (request?.type === "FLIGHT_EVENT_DETECTED") {
+		handleCalendarFlightDetected(request.payload).catch((e) =>
+			console.warn("Calendar flight handler failed:", e)
+		);
+		return;
+	}
+
 	if (request.action === "analyzeWithClaude") {
-		// Ensure config is loaded before processing
 		ensureConfigLoaded()
 			.then(() => handleClaudeAnalysis(request.data))
 			.then((result) => sendResponse({ success: true, data: result }))
 			.catch((error) => sendResponse({ success: false, error: error.message }));
-		return true; // Keep message channel open for async response
+		return true;
 	}
 
-	// Smart Caching: Run Bright Data SERP search -> scrape -> cache
 	if (request?.action === "runSmartCaching") {
 		(async () => {
 			try {
@@ -225,19 +190,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 				sendResponse({ ok: false, error: String(err?.message || err) });
 			}
 		})();
-		return true; // async
+		return true;
 	}
 
-	// Handle page caching with Playwright/simple fallback
 	if (request.action === "getPageContent") {
 		(async () => {
 			try {
+				console.log("📥 Received cache request for URL:", request.url);
+				console.log("⚙️ Cache options:", {
+					maxDepth: request.maxDepth || 0,
+					forceSimple: request.forceSimple || false,
+				});
+
 				await ensureConfigLoaded();
+				console.log("✅ Config loaded, starting cache process...");
 
 				const result = await smartCachePage(request.url, {
 					maxDepth: request.maxDepth || 0,
 					forceSimple: request.forceSimple || false,
 				});
+
+				console.log("✅ Cache process completed successfully");
+				console.log("📊 Method used:", result.method);
+				console.log("📊 Stats:", result.stats);
 
 				sendResponse({
 					success: true,
@@ -245,7 +220,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 					stats: result.stats,
 				});
 			} catch (error) {
-				console.error("Error caching page:", error);
+				console.error("❌ Error caching page:", error);
 				sendResponse({
 					success: false,
 					error: error.message,
@@ -256,214 +231,392 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 	}
 });
 
-// Ensure config is loaded before processing requests
-async function ensureConfigLoaded() {
-	if (!CONFIG) {
-		console.log("Config not loaded, attempting to load...");
-		const loaded = await loadConfig();
-		if (!loaded || !CONFIG) {
-			throw new Error(
-				"Failed to load configuration. Please check that config.js exists and is accessible."
-			);
-		}
-	}
-	return true;
-}
+let __lastFlightTrigger = { hash: null, at: 0 };
+let __flightDetectionCooldown = 0;
 
-// Initialize config on startup
-chrome.runtime.onStartup.addListener(() => {
-	loadConfig();
-});
-
-// ===== PLAYWRIGHT SERVER INTEGRATION =====
-
-// Check if Playwright server is available
-async function checkPlaywrightServer() {
-	if (!CONFIG?.PLAYWRIGHT_ENABLED) {
-		return false;
-	}
-
+function hashString(s) {
 	try {
-		const response = await fetch(`${CONFIG.PLAYWRIGHT_SERVER_URL}/api/health`, {
-			method: "GET",
-			signal: AbortSignal.timeout(3000), // 3 second timeout
-		});
-
-		if (response.ok) {
-			const data = await response.json();
-			console.log("✅ Playwright server is available:", data);
-			return true;
+		let h = 0;
+		for (let i = 0; i < s.length; i++) {
+			h = (h * 31 + s.charCodeAt(i)) | 0;
 		}
-		return false;
-	} catch (error) {
-		console.log("⚠️ Playwright server not available:", error.message);
-		return false;
+		return String(h);
+	} catch {
+		return String(Math.random());
 	}
 }
 
-// Cache page using Playwright server
-async function cacheWithPlaywright(url, maxDepth = 0) {
-	console.log(`🎭 Attempting to cache with Playwright: ${url}`);
+async function handleCalendarFlightDetected(payload = {}) {
+	const { text = "", urls = [], pageUrl = "" } = payload || {};
+
+	const now = Date.now();
+
+	if (now - __flightDetectionCooldown < 5 * 60 * 1000) {
+		console.log("⏸️ Flight detection in cooldown period, ignoring");
+		return;
+	}
+
+	const statusCheck = await chrome.storage.local.get(["flightDetectionStatus"]);
+	if (statusCheck.flightDetectionStatus?.active) {
+		console.log("⏸️ Flight detection already active, ignoring");
+		return;
+	}
+
+	const hash = hashString(text);
+	if (
+		__lastFlightTrigger.hash === hash &&
+		now - __lastFlightTrigger.at < 10 * 60 * 1000
+	) {
+		console.log("⏭️ Duplicate flight trigger, ignoring");
+		return;
+	}
+	__lastFlightTrigger = { hash, at: now };
+	__flightDetectionCooldown = now;
+
+	console.log("✈️ Flight-like calendar event detected:", text);
+
+	await chrome.storage.local.set({
+		flightDetectionStatus: {
+			active: true,
+			flightText: text,
+			timestamp: now,
+			stage: "analyzing",
+		},
+	});
+
+	await ensureConfigLoaded();
 
 	try {
-		const response = await fetch(`${CONFIG.PLAYWRIGHT_SERVER_URL}/api/cache`, {
-			method: "POST",
-			headers: {
-				"Content-Type": "application/json",
+		const queries = extractQueriesFromFlightText(text);
+		if (urls.length) queries.push(...urls);
+
+		if (!queries.length) {
+			console.warn("No queries extracted from flight event");
+			await chrome.storage.local.set({
+				flightDetectionStatus: {
+					active: false,
+					stage: "failed",
+					completedAt: Date.now(),
+				},
+			});
+			return;
+		}
+
+		console.log("Extracted flight queries:", queries);
+
+		await chrome.storage.local.set({
+			flightDetectionStatus: {
+				active: true,
+				flightText: text,
+				timestamp: now,
+				stage: "caching",
+				queries,
 			},
-			body: JSON.stringify({
-				url: url,
-				maxDepth: maxDepth,
-			}),
-			signal: AbortSignal.timeout(CONFIG.PLAYWRIGHT_TIMEOUT || 60000),
 		});
 
-		if (!response.ok) {
-			const errorData = await response.json();
-			throw new Error(errorData.error || "Playwright cache failed");
-		}
+		const token = (CONFIG?.BRIGHTDATA_TOKEN || "").trim();
+		const zone = (CONFIG?.BRIGHTDATA_ZONE || "").trim();
 
-		const result = await response.json();
-		console.log("✅ Playwright cache successful:", result);
-
-		// Get the cached content
-		const contentResponse = await fetch(
-			`${CONFIG.PLAYWRIGHT_SERVER_URL}/api/content/${result.cacheHash}`
-		);
-
-		if (!contentResponse.ok) {
-			throw new Error("Failed to retrieve cached content");
-		}
-
-		const contentData = await contentResponse.json();
-
-		// Store in Chrome extension storage
-		const pageData = {
-			url: result.url,
-			title: extractTitleFromHtml(contentData.content),
-			content: contentData.content,
-			timestamp: Date.now(),
-			favicon: "",
-			method: "playwright",
-			cacheHash: result.cacheHash,
-			stats: result.stats,
-		};
-
-		await saveCachedPage(pageData);
-
-		return {
-			success: true,
-			method: "playwright",
-			...result,
-		};
-	} catch (error) {
-		console.error("❌ Playwright cache error:", error);
-		throw error;
-	}
-}
-
-// Smart cache with Playwright fallback to simple scraping
-async function smartCachePage(url, options = {}) {
-	const { maxDepth = 0, forceSimple = false } = options;
-
-	console.log(`🚀 Starting smart cache for: ${url}`);
-
-	// Try Playwright first if enabled and not forced to use simple
-	if (!forceSimple && CONFIG?.PLAYWRIGHT_ENABLED) {
-		const serverAvailable = await checkPlaywrightServer();
-
-		if (serverAvailable) {
-			try {
-				console.log("📡 Using Playwright server...");
-				const result = await cacheWithPlaywright(url, maxDepth);
-				return result;
-			} catch (error) {
-				console.warn(
-					"⚠️ Playwright failed, falling back to simple scraping:",
-					error.message
+		if (token && zone) {
+			const response = await runSmartCaching(token, zone, queries, 3);
+			if (response?.ok) {
+				console.log(
+					`Flight caching complete: ${response.scraped} pages cached`
 				);
+				await chrome.storage.local.set({
+					flightDetectionStatus: {
+						active: false,
+						stage: "completed",
+						queries,
+						pagesCached: response.scraped,
+						completedAt: Date.now(),
+					},
+				});
+			} else {
+				throw new Error(response?.error || "Unknown error");
 			}
 		} else {
-			console.log("⚠️ Playwright server not available, using simple scraping");
+			console.warn("Bright Data credentials missing, using fallback");
+			await chrome.storage.local.set({
+				flightDetectionStatus: {
+					active: true,
+					stage: "fallback",
+					queries,
+				},
+			});
+			for (const q of queries.slice(0, 3)) {
+				try {
+					await smartCachePage(q, { maxDepth: 0, forceSimple: true });
+				} catch {}
+			}
+			await chrome.storage.local.set({
+				flightDetectionStatus: {
+					active: false,
+					stage: "completed",
+					queries,
+					pagesCached: queries.length,
+					completedAt: Date.now(),
+				},
+			});
+		}
+	} catch (err) {
+		console.error("Flight caching failed:", err);
+		await chrome.storage.local.set({
+			flightDetectionStatus: {
+				active: false,
+				stage: "failed",
+				error: String(err?.message || err),
+				completedAt: Date.now(),
+			},
+		});
+	}
+}
+
+async function checkPlaywrightServer() {
+	try {
+		if (!CONFIG?.PLAYWRIGHT_ENABLED) return false;
+		const url = `${CONFIG.PLAYWRIGHT_SERVER_URL}/api/health`;
+		const res = await fetch(url, {
+			method: "GET",
+			signal: AbortSignal.timeout(3000),
+		});
+		return res.ok;
+	} catch {
+		return false;
+	}
+}
+
+async function cacheWithPlaywright(url, maxDepth = 0) {
+	console.log("🎭 Playwright caching started");
+	const api = (CONFIG?.PLAYWRIGHT_SERVER_URL || "").replace(/\/$/, "");
+	const timeoutMs = Number(CONFIG?.PLAYWRIGHT_TIMEOUT) || 60000;
+	console.log("🌐 Playwright server URL:", api);
+	console.log("⏱️ Timeout:", timeoutMs, "ms");
+
+	console.log("📤 Sending POST request to Playwright server...");
+	const resp = await fetch(`${api}/api/cache`, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify({ url, maxDepth }),
+		signal: AbortSignal.timeout(timeoutMs),
+	});
+
+	console.log("📥 Playwright server response status:", resp.status);
+
+	if (!resp.ok) {
+		throw new Error(`Playwright server error ${resp.status}`);
+	}
+	const data = await resp.json();
+	console.log("📊 Playwright response data:", data);
+
+	if (!data?.success || !data?.cacheHash) {
+		throw new Error("Playwright caching failed");
+	}
+
+	console.log("🔑 Cache hash:", data.cacheHash);
+	console.log("📥 Fetching cached HTML...");
+
+	// Fetch the cached index.html and store in extension storage for offline viewing inside popup
+	const cachedHtmlRes = await fetch(
+		`${api}/cached/${data.cacheHash}/index.html`,
+		{
+			method: "GET",
+			signal: AbortSignal.timeout(Math.min(timeoutMs, 20000)),
+		}
+	);
+
+	console.log("📥 Cached HTML fetch status:", cachedHtmlRes.status);
+
+	if (!cachedHtmlRes.ok)
+		throw new Error(`Cached HTML fetch failed ${cachedHtmlRes.status}`);
+	const content = await cachedHtmlRes.text();
+	const title = extractTitleFromHtml(content) || url;
+
+	console.log("📌 Extracted title:", title);
+	console.log("📦 Content length:", content.length);
+
+	const pageData = { url, title, content, timestamp: Date.now(), favicon: "" };
+
+	console.log("💾 Saving Playwright-cached page to storage...");
+	await saveCachedPage(pageData);
+	console.log("✅ Playwright-cached page saved successfully");
+
+	return { cacheHash: data.cacheHash, stats: data.stats || null };
+}
+
+async function smartCachePage(url, { maxDepth = 0, forceSimple = false } = {}) {
+	console.log("🔍 Smart cache page called for:", url);
+	console.log("🔧 Options:", { maxDepth, forceSimple });
+
+	if (!url || typeof url !== "string") throw new Error("Invalid URL");
+	if (isRestrictedUrl(url)) throw new Error("Restricted URL");
+
+	const wantPlaywright = !!CONFIG?.PLAYWRIGHT_ENABLED && !forceSimple;
+	console.log("🎭 Playwright wanted:", wantPlaywright);
+
+	if (wantPlaywright && (await checkPlaywrightServer())) {
+		try {
+			console.log("🎭 Attempting Playwright caching...");
+			const res = await cacheWithPlaywright(url, maxDepth);
+			console.log("✅ Playwright caching successful");
+			return { method: "playwright", stats: res.stats };
+		} catch (e) {
+			console.warn("⚠️ Playwright caching failed, falling back to simple:", e);
+			// fall through to simple
+		}
+	} else if (wantPlaywright) {
+		console.log("⚠️ Playwright server not available, using simple caching");
+	}
+
+	console.log("📄 Using simple offscreen caching...");
+	const { content, title } = await scrapePage(url);
+	console.log("📦 Content retrieved, length:", content?.length || 0);
+	console.log("📌 Page title:", title);
+
+	if (!content) throw new Error("Empty content");
+
+	const pageData = {
+		url,
+		title: title || url,
+		content,
+		timestamp: Date.now(),
+		favicon: "",
+	};
+
+	console.log("💾 Saving page to storage...");
+	await saveCachedPage(pageData);
+	console.log("✅ Page saved successfully");
+
+	return { method: "simple", stats: null };
+}
+
+async function prepareDataForClaudeBackground() {
+	const maxHist = Math.min(
+		clampInt(CONFIG?.MAX_HISTORY_ITEMS, 100, 200000, 1000),
+		1000
+	);
+	const maxTabs = Math.min(
+		clampInt(CONFIG?.MAX_TABS_ITEMS, 10, 5000, 100),
+		100
+	);
+
+	const historyItems = await new Promise((resolve) => {
+		try {
+			chrome.history.search(
+				{ text: "", startTime: 0, maxResults: maxHist },
+				(items) => resolve(Array.isArray(items) ? items : [])
+			);
+		} catch (e) {
+			console.warn("history.search failed:", e);
+			resolve([]);
+		}
+	});
+
+	const tabs = await new Promise((resolve) => {
+		try {
+			chrome.tabs.query({}, (ts) => resolve(Array.isArray(ts) ? ts : []));
+		} catch (e) {
+			console.warn("tabs.query failed:", e);
+			resolve([]);
+		}
+	});
+
+	return {
+		browser_history: historyItems.slice(0, 500).map((h) => ({
+			url: h.url,
+			title: h.title,
+			lastVisitTime: h.lastVisitTime,
+		})),
+		current_tabs: tabs
+			.slice(0, 50)
+			.map((t) => ({ url: t.url, title: t.title })),
+	};
+}
+
+function generateQueriesFromCategoriesBackground(categories, maxQueries = 10) {
+	const out = [];
+	for (const cat of categories || []) {
+		if (cat?.keywords) out.push(...(cat.keywords || []));
+		if (cat?.name) out.push(String(cat.name));
+		if (Array.isArray(cat?.urls)) {
+			// derive a couple of hostnames as queries (broad)
+			for (const u of cat.urls) {
+				try {
+					const host = new URL(u).hostname.replace(/^www\./, "");
+					if (host) out.push(host);
+				} catch {}
+			}
 		}
 	}
+	return Array.from(
+		new Set(out.map((q) => (q || "").toString().trim()).filter(Boolean))
+	).slice(0, maxQueries);
+}
 
-	// Fallback to simple scraping
-	console.log("📄 Using simple scraping...");
+function extractQueriesFromFlightText(text = "") {
+	const queries = [];
 	try {
-		const { content, title } = await scrapePage(url);
-
-		const pageData = {
-			url: url,
-			title: title || url,
-			content: content,
-			timestamp: Date.now(),
-			favicon: "",
-			method: "simple",
-		};
-
-		await saveCachedPage(pageData);
-
-		return {
-			success: true,
-			method: "simple",
-			url: url,
-		};
-	} catch (error) {
-		console.error("❌ Simple scraping also failed:", error);
-		throw new Error(`All caching methods failed: ${error.message}`);
-	}
+		const airlineCode = (text.match(/(?:^|\s)([A-Z]{2})\s?\d{2,4}(?=\b)/) ||
+			[])[1];
+		const airports = text.match(/\b[A-Z]{3}\b/g) || [];
+		if (airlineCode) queries.push(`${airlineCode} flight status`);
+		if (airports.length >= 2) {
+			queries.push(`${airports[0]} to ${airports[1]} flights`);
+			queries.push(`${airports[0]} ${airports[1]} flight status`);
+		}
+		queries.push(
+			"check in",
+			"boarding pass",
+			"manage booking",
+			"baggage policy"
+		);
+	} catch {}
+	return Array.from(new Set(queries.map((q) => q.trim()).filter(Boolean)));
 }
 
-// Create Claude prompt for URL clustering
-function createClaudePrompt(data) {
-	// Extract URLs from history and tabs, but limit and clean them
-	const historyUrls = data.browser_history
-		.map((item) => item.url)
-		.filter((url) => url && url.length < 200) // Filter out very long URLs
-		.slice(0, 50); // Limit to first 50 for prompt length
-
-	const tabUrls = data.current_tabs
-		.map((tab) => tab.url)
-		.filter((url) => url && url.length < 200); // Filter out very long URLs
-
-	return `Analyze the following browser history and current tabs. Group the URLs into relevant categories/topics based on their content and purpose.
-
-BROWSER HISTORY URLs (${data.total_history_items} total, showing first 50):
-${historyUrls.join("\n")}
-
-CURRENT TABS URLs (${data.total_open_tabs} total):
-${tabUrls.join("\n")}
-
-Please return a JSON array of categories with the following structure:
-[
-  {
-    "category_name": "string",
-    "description": "string explaining what this category represents",
-    "urls": ["array of relevant URLs from the data"],
-    "confidence": 0.95,
-    "keywords": ["array of keywords that define this category"]
-  }
-]
-
-Focus on creating meaningful categories that reflect the user's interests and browsing patterns. Consider:
-- Website domains and purposes
-- Content themes and topics
-- User behavior patterns
-- Frequency of visits
-
-IMPORTANT: Return ONLY valid JSON. Do not include any markdown formatting, code blocks, or additional text.`;
-}
-
-// Call Claude API to analyze data
 async function callClaudeAPI(data) {
 	try {
-		// Config should already be loaded by ensureConfigLoaded()
 		if (!CONFIG.CLAUDE_API_KEY) {
 			throw new Error("Claude API key not found in configuration.");
 		}
 
-		const prompt = createClaudePrompt(data);
+		function createClaudePrompt(data) {
+			try {
+				const history = Array.isArray(data?.browser_history)
+					? data.browser_history.slice(0, 200)
+					: [];
+				const tabs = Array.isArray(data?.current_tabs) ? data.current_tabs : [];
+
+				const truncateText = (text, maxLen = 100) => {
+					if (!text) return "Untitled";
+					return text.length > maxLen
+						? text.substring(0, maxLen) + "..."
+						: text;
+				};
+
+				const historyPreview = history
+					.slice(0, 100)
+					.map(
+						(h, i) =>
+							`${i + 1}. ${truncateText(h.title)} — ${truncateText(h.url, 80)}`
+					)
+					.join("\n");
+
+				const tabsPreview = tabs
+					.slice(0, 30)
+					.map(
+						(t, i) =>
+							`${i + 1}. ${truncateText(t.title)} — ${truncateText(t.url, 80)}`
+					)
+					.join("\n");
+
+				return `You are given anonymized browsing data. Infer 5-8 high-level content categories the user is interested in.\n\nReturn ONLY a JSON array. Each item must have the following fields:\n- "category_name": short human-readable string (e.g., "Travel: Flights", "AI/ML News")\n- "name": optional alias of category_name (string)\n- "description": 1-2 sentences summarizing the theme (string)\n- "confidence": number between 0 and 1 (e.g., 0.82)\n- "keywords": array of 3-6 representative keywords/phrases (strings)\n- "urls": array of up to 5 representative URLs from the input (strings)\n\nStrict JSON ONLY. No markdown, no code fences, no extra commentary.\n\nContext:\n- Recent History (sample):\n${
+					historyPreview || "(none)"
+				}\n- Open Tabs (sample):\n${tabsPreview || "(none)"}`;
+			} catch (e) {
+				return "[]";
+			}
+		}
 
 		const response = await fetch(CONFIG.CLAUDE_API_URL, {
 			method: "POST",
@@ -474,19 +627,17 @@ async function callClaudeAPI(data) {
 				"anthropic-dangerous-direct-browser-access": "true",
 			},
 			body: JSON.stringify({
-				model: CONFIG.CLAUDE_MODEL,
-				max_tokens: 4000,
-				messages: [
-					{
-						role: "user",
-						content: prompt,
-					},
-				],
+				model: CONFIG.CLAUDE_MODEL || "claude-3-5-haiku-latest",
+				max_tokens: 2048,
+				temperature: 0.2,
+				messages: [{ role: "user", content: createClaudePrompt(data) }],
 			}),
 		});
-
 		if (!response.ok) {
-			const errorData = await response.json();
+			let errorData = {};
+			try {
+				errorData = await response.json();
+			} catch {}
 			throw new Error(
 				`Claude API error: ${response.status} - ${
 					errorData.error?.message || "Unknown error"
@@ -496,8 +647,9 @@ async function callClaudeAPI(data) {
 
 		const result = await response.json();
 		console.log("Claude API response:", result);
-		console.log("Claude response content:", result.content[0].text);
-		return result.content[0].text;
+		const text = result?.content?.[0]?.text || "";
+		console.log("Claude response content:", text);
+		return text;
 	} catch (error) {
 		console.error("Error calling Claude API:", error);
 		throw error;
@@ -542,13 +694,41 @@ async function handleClaudeAnalysis(data) {
 			}
 
 			console.log("Cleaned response:", cleanResponse);
-			categories = JSON.parse(cleanResponse);
+
+			// Try to parse - if it fails, it might be truncated
+			try {
+				categories = JSON.parse(cleanResponse);
+			} catch (parseErr) {
+				console.warn(
+					"Initial parse failed, attempting to fix truncated JSON..."
+				);
+
+				// Try to fix common truncation issues
+				// If the JSON ends abruptly, try to close it properly
+				if (!cleanResponse.trim().endsWith("]")) {
+					// Try to find the last complete object and close the array
+					const lastCompleteObj = cleanResponse.lastIndexOf("}");
+					if (lastCompleteObj > 0) {
+						cleanResponse =
+							cleanResponse.substring(0, lastCompleteObj + 1) + "\n]";
+						console.log("Attempted to fix truncated JSON:", cleanResponse);
+						categories = JSON.parse(cleanResponse);
+					} else {
+						throw parseErr;
+					}
+				} else {
+					throw parseErr;
+				}
+			}
+
 			console.log("Successfully parsed categories:", categories);
 		} catch (parseError) {
 			console.error("Error parsing Claude response:", parseError);
 			console.error("Raw response that failed to parse:", claudeResponse);
 			console.error("Parse error details:", parseError.message);
-			throw new Error("Failed to parse Claude response. Please try again.");
+			throw new Error(
+				"Failed to parse Claude response. The response may be incomplete. Please try again."
+			);
 		}
 
 		// Cache the results
@@ -713,21 +893,35 @@ async function ensureOffscreen() {
 }
 
 async function scrapePage(url) {
+	console.log("🔍 Starting offscreen scraping for:", url);
 	await ensureOffscreen();
+	console.log("✅ Offscreen document ready");
+
 	return new Promise((resolve, reject) => {
 		const requestId = Math.random().toString(36).slice(2);
+		console.log("🔑 Scrape request ID:", requestId);
+
 		const onMsg = (msg) => {
 			if (msg?.type === "SCRAPE_RESULT" && msg.requestId === requestId) {
+				console.log("📥 Received scrape result for request:", requestId);
 				chrome.runtime.onMessage.removeListener(onMsg);
-				msg.error
-					? reject(new Error(msg.error))
-					: resolve({ content: msg.content, title: msg.title });
+				if (msg.error) {
+					console.error("❌ Scraping error:", msg.error);
+					reject(new Error(msg.error));
+				} else {
+					console.log("✅ Scraping successful");
+					console.log("📦 Content length:", msg.content?.length || 0);
+					console.log("📌 Title:", msg.title);
+					resolve({ content: msg.content, title: msg.title });
+				}
 			}
 		};
 		chrome.runtime.onMessage.addListener(onMsg);
+		console.log("📤 Sending scrape request to offscreen document...");
 		chrome.runtime.sendMessage({ type: "SCRAPE_URL", url, requestId });
 		setTimeout(() => {
 			chrome.runtime.onMessage.removeListener(onMsg);
+			console.error("⏱️ Offscreen scraping timeout after 25s");
 			reject(new Error("Offscreen timeout"));
 		}, 25000);
 	});
@@ -744,10 +938,18 @@ function extractTitleFromHtml(html) {
 }
 
 async function saveCachedPage(pageData) {
+	console.log("💾 Saving cached page to storage...");
+	console.log("📄 Page URL:", pageData.url);
+	console.log("📌 Page title:", pageData.title);
+
 	const existing =
 		(await chrome.storage.local.get(["cachedPages"]))?.cachedPages || [];
+	console.log("📚 Existing cached pages count:", existing.length);
+
 	existing.push(pageData);
 	await chrome.storage.local.set({ cachedPages: existing });
+
+	console.log("✅ Page saved! Total cached pages:", existing.length);
 }
 
 function clampInt(v, min, max, dflt) {
@@ -914,73 +1116,7 @@ async function isRecentlyAnalyzed(url) {
 	}
 }
 
-// Mark URL as analyzed
-async function markUrlAsAnalyzed(url) {
-	try {
-		const result = await chrome.storage.local.get(["analyzedUrls"]);
-		const analyzedUrls = result.analyzedUrls || {};
-		analyzedUrls[url] = Date.now();
-		await chrome.storage.local.set({ analyzedUrls });
-	} catch (error) {
-		console.error("Error marking URL as analyzed:", error);
-	}
-}
-
-// Auto-analyze and cache a single URL
-async function autoAnalyzeAndCache(url) {
-	try {
-		console.log("Auto-caching URL:", url);
-
-		// Check if URL is restricted
-		if (isRestrictedUrl(url)) {
-			console.log("Skipping restricted URL:", url);
-			return;
-		}
-
-		// Ensure config is loaded
-		await ensureConfigLoaded();
-
-		// Generate queries based on URL content
-		const queries = await generateQueriesFromUrl(url);
-		if (queries.length === 0) {
-			console.log("No queries generated for URL:", url);
-			return;
-		}
-
-		// Get Bright Data credentials
-		const token = (CONFIG?.BRIGHTDATA_TOKEN || "").trim();
-		const zone = (CONFIG?.BRIGHTDATA_ZONE || "").trim();
-		if (!token || !zone) {
-			console.log("Missing Bright Data credentials, skipping auto-cache");
-			return;
-		}
-
-		// Run smart caching for this URL
-		const resultsPerQuery = CONFIG?.SERP_RESULTS_PER_QUERY || 3; // Fewer results for auto-caching
-		const response = await runSmartCaching(
-			token,
-			zone,
-			queries,
-			resultsPerQuery
-		);
-
-		if (response?.ok) {
-			console.log(
-				`Auto-caching complete for ${url}: ${response.scraped} pages cached`
-			);
-
-			// Show notification
-			await showAutoCacheNotification(url, response.scraped);
-		} else {
-			console.error("Auto-caching failed for URL:", url, response?.error);
-		}
-
-		// Mark URL as analyzed
-		await markUrlAsAnalyzed(url);
-	} catch (error) {
-		console.error("Error in auto-analyze and cache:", error);
-	}
-}
+// (removed duplicate/corrupted createClaudePrompt and callClaudeAPI definitions)
 
 // Generate queries from a single URL using Claude analysis
 async function generateQueriesFromUrl(url) {

@@ -1,8 +1,6 @@
-// Prevent double-injection if programmatically injected
 if (!window.__smartCachingContentScriptLoaded) {
 	window.__smartCachingContentScriptLoaded = true;
 
-	// Listen for messages from popup
 	chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 		if (request.action === "ping") {
 			sendResponse({ ok: true });
@@ -11,12 +9,8 @@ if (!window.__smartCachingContentScriptLoaded) {
 
 		if (request.action === "getPageContent") {
 			try {
-				// Get the page content
 				const content = document.documentElement.outerHTML;
-
-				// Clean up the content (remove scripts, etc.)
 				const cleanContent = cleanPageContent(content);
-
 				sendResponse({ content: cleanContent });
 			} catch (error) {
 				console.error("Error getting page content:", error);
@@ -29,15 +23,12 @@ if (!window.__smartCachingContentScriptLoaded) {
 	});
 
 	function cleanPageContent(content) {
-		// Create a temporary DOM element to parse and clean the content
 		const tempDiv = document.createElement("div");
 		tempDiv.innerHTML = content;
 
-		// Remove scripts
 		const scripts = tempDiv.querySelectorAll("script");
 		scripts.forEach((script) => script.remove());
 
-		// Remove event handlers from elements
 		const allElements = tempDiv.querySelectorAll("*");
 		allElements.forEach((element) => {
 			const eventAttributes = [
@@ -51,7 +42,6 @@ if (!window.__smartCachingContentScriptLoaded) {
 			eventAttributes.forEach((attr) => element.removeAttribute(attr));
 		});
 
-		// Add a note that this is cached content
 		const body = tempDiv.querySelector("body");
 		if (body) {
 			const cacheNote = document.createElement("div");

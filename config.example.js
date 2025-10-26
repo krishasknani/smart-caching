@@ -25,9 +25,9 @@ const CONFIG = {
 	// Cache Settings
 	CACHE_DURATION_HOURS: 24,
 
-	// Analysis Settings
-	MAX_HISTORY_ITEMS: 100000,
-	MAX_TABS_ITEMS: 1000,
+	// Analysis Settings - Keep these reasonable to avoid Claude API token limits
+	MAX_HISTORY_ITEMS: 1000, // Max history items to analyze (Claude has 200k token limit)
+	MAX_TABS_ITEMS: 100, // Max open tabs to analyze
 };
 
 // Export for use in other files

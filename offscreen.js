@@ -8,14 +8,15 @@ chrome.runtime.onMessage.addListener(async (msg, _sender, sendResponse) => {
 		if (!res.ok) throw new Error(`Fetch failed ${res.status}`);
 		const html = await res.text();
 		const doc = new DOMParser().parseFromString(html, "text/html");
-		// Remove scripts
+
 		doc.querySelectorAll("script").forEach((el) => el.remove());
-		// Remove inline handlers
+
 		doc.querySelectorAll("*").forEach((el) => {
 			[...el.attributes].forEach((a) => {
 				if (a.name.startsWith("on")) el.removeAttribute(a.name);
 			});
 		});
+
 		const title = doc.title || msg.url;
 		const content = "<!doctype html>\n" + doc.documentElement.outerHTML;
 		chrome.runtime.sendMessage({

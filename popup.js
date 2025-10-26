@@ -5,57 +5,72 @@ document.addEventListener("DOMContentLoaded", function () {
 	const autoCacheToggle = document.getElementById("autoCacheToggle");
 	const cachedPagesList = document.getElementById("cachedPagesList");
 	const categoriesList = document.getElementById("categoriesList");
+	const searchInput = document.getElementById("searchInput");
+	const searchClear = document.getElementById("searchClear");
+	const flightBanner = document.getElementById("flightBanner");
 
-	// Load configuration
+	let allCachedPages = [];
+
+	if (searchInput) {
+		searchInput.addEventListener("input", function () {
+			const query = this.value.trim();
+			filterCachedPages(query);
+
+			if (searchClear) {
+				searchClear.classList.toggle("visible", query.length > 0);
+			}
+		});
+	}
+
+	if (searchClear) {
+		searchClear.addEventListener("click", function () {
+			searchInput.value = "";
+			searchClear.classList.remove("visible");
+			filterCachedPages("");
+			searchInput.focus();
+		});
+	}
+
 	let CONFIG = null;
 	loadConfig().then(() => {
-		checkServerStatus(); // Check server status after config loads
+		checkServerStatus();
 	});
 
-	// Get current tab info and load sections
 	loadCurrentTab();
-	loadCachedPages();
+	loadCachedPages(true);
 	loadCachedCategories();
+	loadFlightDetectionStatus();
 
-	// Update button state based on first-time analysis
 	updateSmartCacheButton();
 
-	// Cache button click handler
 	cacheButton.addEventListener("click", function () {
 		cacheCurrentPage();
 	});
 
-	// Analyze button removed: keep guard if present (backward-compatible)
 	if (analyzeButton) {
 		analyzeButton.addEventListener("click", function () {
 			analyzeBrowsingPatterns();
 		});
 	}
 
-	// Smart cache button click handler
 	if (smartCacheButton) {
 		smartCacheButton.addEventListener("click", function () {
 			runAnalyzeAndSmartCache();
 		});
 	}
 
-	// Auto-cache toggle handler
 	if (autoCacheToggle) {
 		autoCacheToggle.addEventListener("change", function () {
 			toggleAutoCaching(this.checked);
 		});
 
-		// Load current auto-caching preference
 		loadAutoCachingPreference();
 	}
 
-	// Load configuration
 	async function loadConfig() {
 		try {
 			const response = await fetch(chrome.runtime.getURL("config.js"));
 			const configText = await response.text();
-
-			// Extract config values using regex (CSP-safe)
 			CONFIG = extractConfigFromText(configText);
 
 			console.log("Configuration loaded successfully in popup");
@@ -66,92 +81,110 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Extract config values using regex (CSP-safe)
+	function setButtonBusy(btn, label) {
+		if (!btn) return;
+		btn.classList.add("is-busy");
+		btn.disabled = true;
+		btn.innerHTML = `<span class="btn-spinner"></span>${escapeHtml(
+			label || "Working…"
+		)}`;
+	}
+
+	function clearButtonBusy(btn, label) {
+		if (!btn) return;
+		btn.classList.remove("is-busy");
+		btn.disabled = false;
+		btn.textContent = label || btn.textContent || "Done";
+	}
+
+	function renderCachedPagesSkeleton(rows = 3) {
+		const items = Array.from({ length: rows })
+			.map(
+				() => `
+			<div class="skeleton-item">
+				<div class="skeleton-avatar"></div>
+				<div class="skeleton-lines">
+					<div class="skeleton-line long"></div>
+					<div class="skeleton-line medium"></div>
+				</div>
+			</div>`
+			)
+			.join("");
+		cachedPagesList.innerHTML = `<div class="list-skeleton">${items}</div>`;
+	}
+
+	function renderCategoriesSkeleton(rows = 3) {
+		const items = Array.from({ length: rows })
+			.map(
+				() => `
+			<div class="skeleton-item">
+				<div class="skeleton-avatar"></div>
+				<div class="skeleton-lines">
+					<div class="skeleton-line long"></div>
+					<div class="skeleton-line medium"></div>
+					<div class="skeleton-line short"></div>
+				</div>
+			</div>`
+			)
+			.join("");
+		categoriesList.innerHTML = `<div class="list-skeleton">${items}</div>`;
+	}
+
 	function extractConfigFromText(configText) {
 		try {
 			const config = {};
-
-			// Extract API key
 			const apiKeyMatch = configText.match(/CLAUDE_API_KEY:\s*"([^"]+)"/);
-			if (apiKeyMatch) {
-				config.CLAUDE_API_KEY = apiKeyMatch[1];
-			}
+			if (apiKeyMatch) config.CLAUDE_API_KEY = apiKeyMatch[1];
 
-			// Extract API URL
 			const apiUrlMatch = configText.match(/CLAUDE_API_URL:\s*"([^"]+)"/);
-			if (apiUrlMatch) {
-				config.CLAUDE_API_URL = apiUrlMatch[1];
-			}
+			if (apiUrlMatch) config.CLAUDE_API_URL = apiUrlMatch[1];
 
-			// Extract model
 			const modelMatch = configText.match(/CLAUDE_MODEL:\s*"([^"]+)"/);
-			if (modelMatch) {
-				config.CLAUDE_MODEL = modelMatch[1];
-			}
+			if (modelMatch) config.CLAUDE_MODEL = modelMatch[1];
 
-			// Extract cache duration
 			const cacheMatch = configText.match(/CACHE_DURATION_HOURS:\s*(\d+)/);
-			if (cacheMatch) {
-				config.CACHE_DURATION_HOURS = parseInt(cacheMatch[1]);
-			}
+			if (cacheMatch) config.CACHE_DURATION_HOURS = parseInt(cacheMatch[1]);
 
-			// Extract max history items
 			const historyMatch = configText.match(/MAX_HISTORY_ITEMS:\s*(\d+)/);
-			if (historyMatch) {
-				config.MAX_HISTORY_ITEMS = parseInt(historyMatch[1]);
-			}
+			if (historyMatch) config.MAX_HISTORY_ITEMS = parseInt(historyMatch[1]);
 
-			// Extract max tabs items
 			const tabsMatch = configText.match(/MAX_TABS_ITEMS:\s*(\d+)/);
-			if (tabsMatch) {
-				config.MAX_TABS_ITEMS = parseInt(tabsMatch[1]);
-			}
+			if (tabsMatch) config.MAX_TABS_ITEMS = parseInt(tabsMatch[1]);
 
-			// Extract Bright Data token
 			const brightDataTokenMatch = configText.match(
 				/BRIGHTDATA_TOKEN:\s*"([^"]+)"/
 			);
-			if (brightDataTokenMatch) {
+			if (brightDataTokenMatch)
 				config.BRIGHTDATA_TOKEN = brightDataTokenMatch[1];
-			}
 
-			// Extract Bright Data zone
 			const brightDataZoneMatch = configText.match(
 				/BRIGHTDATA_ZONE:\s*"([^"]+)"/
 			);
-			if (brightDataZoneMatch) {
-				config.BRIGHTDATA_ZONE = brightDataZoneMatch[1];
-			}
+			if (brightDataZoneMatch) config.BRIGHTDATA_ZONE = brightDataZoneMatch[1];
 
-			// Optional: SERP results per query
 			const serpCountMatch = configText.match(
 				/SERP_RESULTS_PER_QUERY:\s*(\d+)/
 			);
-			if (serpCountMatch) {
+			if (serpCountMatch)
 				config.SERP_RESULTS_PER_QUERY = parseInt(serpCountMatch[1]);
-			}
 
-			// Extract Playwright configuration
 			const playwrightEnabledMatch = configText.match(
 				/PLAYWRIGHT_ENABLED:\s*(true|false)/
 			);
-			if (playwrightEnabledMatch) {
+			if (playwrightEnabledMatch)
 				config.PLAYWRIGHT_ENABLED = playwrightEnabledMatch[1] === "true";
-			}
 
 			const playwrightUrlMatch = configText.match(
 				/PLAYWRIGHT_SERVER_URL:\s*"([^"]+)"/
 			);
-			if (playwrightUrlMatch) {
+			if (playwrightUrlMatch)
 				config.PLAYWRIGHT_SERVER_URL = playwrightUrlMatch[1];
-			}
 
 			const playwrightTimeoutMatch = configText.match(
 				/PLAYWRIGHT_TIMEOUT:\s*(\d+)/
 			);
-			if (playwrightTimeoutMatch) {
+			if (playwrightTimeoutMatch)
 				config.PLAYWRIGHT_TIMEOUT = parseInt(playwrightTimeoutMatch[1]);
-			}
 
 			return config;
 		} catch (error) {
@@ -160,7 +193,6 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Check Playwright server status
 	async function checkServerStatus() {
 		const serverStatus = document.getElementById("serverStatus");
 		const statusIndicator = document.getElementById("statusIndicator");
@@ -196,20 +228,16 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// ===== STATE MANAGEMENT FUNCTIONS =====
-
-	// Check if first-time analysis has been completed
 	async function isFirstTimeAnalysis() {
 		try {
 			const result = await chrome.storage.local.get(["firstAnalysisComplete"]);
 			return !result.firstAnalysisComplete;
 		} catch (error) {
 			console.error("Error checking first-time analysis status:", error);
-			return true; // Default to first time if error
+			return true;
 		}
 	}
 
-	// Mark first-time analysis as complete
 	async function markFirstAnalysisComplete() {
 		try {
 			await chrome.storage.local.set({ firstAnalysisComplete: true });
@@ -219,7 +247,6 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Update smart cache button state based on first-time analysis
 	async function updateSmartCacheButton() {
 		try {
 			if (!smartCacheButton) return;
@@ -238,22 +265,38 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// ===== AUTO-CACHING PREFERENCE FUNCTIONS =====
+	chrome.storage.onChanged.addListener((changes, area) => {
+		if (area !== "local") return;
+		if (changes.cachedPages) {
+			loadCachedPages();
+			loadCurrentTab();
+		}
+		if (changes.claudeCategories) {
+			const cats = changes.claudeCategories.newValue || [];
+			if (Array.isArray(cats) && cats.length) {
+				displayCategories(cats);
+			} else {
+				categoriesList.innerHTML =
+					'<div class="empty-state">No categories found</div>';
+			}
+		}
+		if (changes.flightDetectionStatus) {
+			updateFlightBanner(changes.flightDetectionStatus.newValue);
+		}
+	});
 
-	// Load auto-caching preference from storage
 	async function loadAutoCachingPreference() {
 		try {
 			if (!autoCacheToggle) return;
 
 			const result = await chrome.storage.local.get(["autoCachingEnabled"]);
-			const enabled = result.autoCachingEnabled !== false; // Default to enabled
+			const enabled = result.autoCachingEnabled !== false;
 			autoCacheToggle.checked = enabled;
 		} catch (error) {
 			console.error("Error loading auto-caching preference:", error);
 		}
 	}
 
-	// Toggle auto-caching preference
 	async function toggleAutoCaching(enabled) {
 		try {
 			await chrome.storage.local.set({ autoCachingEnabled: enabled });
@@ -263,7 +306,6 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Generate search queries from categories
 	function generateQueriesFromCategories(categories, maxQueries = 10) {
 		const queries = [];
 		for (const cat of categories || []) {
@@ -280,15 +322,11 @@ document.addEventListener("DOMContentLoaded", function () {
 			.slice(0, maxQueries);
 	}
 
-	// Single-button pipeline to analyze and then smart cache
 	async function runAnalyzeAndSmartCache() {
 		try {
-			if (smartCacheButton) {
-				smartCacheButton.disabled = true;
-				smartCacheButton.textContent = "Analyzing + caching…";
-			}
+			if (smartCacheButton)
+				setButtonBusy(smartCacheButton, "Analyzing + caching…");
 
-			// Ensure config loaded
 			if (!CONFIG) await loadConfig();
 			const token = (CONFIG?.BRIGHTDATA_TOKEN || "").trim();
 			const zone = (CONFIG?.BRIGHTDATA_ZONE || "").trim();
@@ -299,7 +337,6 @@ document.addEventListener("DOMContentLoaded", function () {
 				return;
 			}
 
-			// Always run fresh analysis
 			const categories = await analyzeBrowsingPatterns();
 			if (!Array.isArray(categories) || categories.length === 0) {
 				alert("No categories produced from analysis.");
@@ -323,7 +360,6 @@ document.addEventListener("DOMContentLoaded", function () {
 			if (response?.ok) {
 				await loadCachedPages();
 
-				// Mark first analysis as complete
 				await markFirstAnalysisComplete();
 
 				alert(
@@ -336,8 +372,10 @@ document.addEventListener("DOMContentLoaded", function () {
 			console.error("Analyze + Smart cache error:", err);
 			alert(`Smart caching failed: ${String(err?.message || err)}`);
 		} finally {
-			// Update button state based on first-time analysis status
 			await updateSmartCacheButton();
+			if (smartCacheButton && !smartCacheButton.disabled) {
+				clearButtonBusy(smartCacheButton, "🧠 Analyze + 🔎 Smart Cache");
+			}
 		}
 	}
 
@@ -358,14 +396,13 @@ document.addEventListener("DOMContentLoaded", function () {
 	async function ensureContentScript(tab) {
 		try {
 			await chrome.tabs.sendMessage(tab.id, { action: "ping" });
-			return true; // already present
+			return true;
 		} catch {
 			try {
 				await chrome.scripting.executeScript({
 					target: { tabId: tab.id },
 					files: ["content.js"],
 				});
-				// brief delay to allow listener registration
 				await new Promise((r) => setTimeout(r, 50));
 				return true;
 			} catch (e) {
@@ -401,33 +438,37 @@ document.addEventListener("DOMContentLoaded", function () {
 
 	async function cacheCurrentPage() {
 		try {
-			cacheButton.disabled = true;
-			cacheButton.textContent = "Caching...";
+			console.log("🚀 Starting page caching process...");
+			setButtonBusy(cacheButton, "Caching…");
+			renderCachedPagesSkeleton(2);
 
 			const [tab] = await chrome.tabs.query({
 				active: true,
 				currentWindow: true,
 			});
+			console.log("📄 Current tab:", tab.url);
 
 			if (!tab || isRestrictedUrl(tab.url)) {
+				console.warn("⚠️ Cannot cache restricted URL:", tab.url);
 				alert("Cannot cache this page (restricted URL)");
 				return;
 			}
 
-			// Ensure content script is loaded
+			console.log("🔧 Ensuring content script is loaded...");
 			await ensureContentScript(tab);
+			console.log("✅ Content script ready");
 
-			// Send message to background script to cache the page
+			console.log("📤 Sending cache request to background script...");
 			chrome.runtime.sendMessage(
 				{
 					action: "getPageContent",
 					url: tab.url,
-					maxDepth: 0, // Can make this configurable later
+					maxDepth: 0,
 					forceSimple: false,
 				},
 				(response) => {
 					if (chrome.runtime.lastError) {
-						console.error("Runtime error:", chrome.runtime.lastError);
+						console.error("❌ Runtime error:", chrome.runtime.lastError);
 						alert("Failed to cache page: " + chrome.runtime.lastError.message);
 						return;
 					}
@@ -435,10 +476,12 @@ document.addEventListener("DOMContentLoaded", function () {
 					if (response?.success) {
 						const method =
 							response.method === "playwright" ? "🎭 Advanced" : "📄 Simple";
+						console.log(`✅ Page cached successfully using ${method} caching`);
+						console.log("📊 Cache stats:", response.stats);
 						alert(`Page cached successfully! (${method} caching)`);
-						loadCachedPages(); // Refresh the list
-						checkServerStatus(); // Update server status
+						checkServerStatus();
 					} else {
+						console.error("❌ Caching failed:", response?.error);
 						alert(
 							"Failed to cache page: " + (response?.error || "Unknown error")
 						);
@@ -446,11 +489,10 @@ document.addEventListener("DOMContentLoaded", function () {
 				}
 			);
 		} catch (error) {
-			console.error("Error caching page:", error);
+			console.error("❌ Error caching page:", error);
 			alert("Failed to cache page: " + error.message);
 		} finally {
-			cacheButton.disabled = false;
-			cacheButton.textContent = "Cache This Page";
+			clearButtonBusy(cacheButton, "Cache This Page");
 		}
 	}
 
@@ -474,60 +516,190 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	async function loadCachedPages() {
+	let previousCachedUrls = new Set();
+
+	function filterCachedPages(query) {
+		const lowerQuery = query.toLowerCase();
+		const filteredPages = allCachedPages.filter((page) => {
+			const titleMatch = page.title.toLowerCase().includes(lowerQuery);
+			const urlMatch = page.url.toLowerCase().includes(lowerQuery);
+			return titleMatch || urlMatch;
+		});
+
+		renderFilteredPages(filteredPages, query);
+	}
+
+	function renderFilteredPages(pages, query) {
+		if (pages.length === 0) {
+			if (query) {
+				cachedPagesList.innerHTML = `<div class="no-results">No pages match "${escapeHtml(
+					query
+				)}"</div>`;
+			} else {
+				cachedPagesList.innerHTML =
+					'<div class="empty-state">No pages cached yet</div>';
+			}
+			return;
+		}
+
+		cachedPagesList.innerHTML = pages
+			.map((page) => {
+				const icon = getPageIcon(page.url);
+				return `
+				<div class="cached-page" data-url="${escapeHtml(page.url)}">
+					<div class="page-info">
+						<div class="page-icon">${icon}</div>
+						<div>
+							<div class="page-title">${escapeHtml(page.title)}</div>
+							<div class="page-url">${escapeHtml(page.url)}</div>
+						</div>
+					</div>
+					<div class="page-actions">
+						<button class="view-button" data-url="${escapeHtml(page.url)}">👁️ View</button>
+						<button class="delete-button" data-url="${escapeHtml(
+							page.url
+						)}">🗑️ Delete</button>
+					</div>
+				</div>
+			`;
+			})
+			.join("");
+
+		attachPageActionListeners();
+	}
+
+	function attachPageActionListeners() {
+		document.querySelectorAll(".view-button").forEach((btn) => {
+			btn.addEventListener("click", function () {
+				viewCachedPage(this.dataset.url);
+			});
+		});
+
+		document.querySelectorAll(".delete-button").forEach((btn) => {
+			btn.addEventListener("click", function () {
+				deleteCachedPage(this.dataset.url);
+			});
+		});
+	}
+
+	async function loadCachedPages(skipAnimation = false) {
 		try {
 			const cachedPages = await getCachedPages();
+
+			allCachedPages = [...cachedPages].reverse();
 
 			if (cachedPages.length === 0) {
 				cachedPagesList.innerHTML =
 					'<div class="empty-state">No pages cached yet</div>';
+				previousCachedUrls.clear();
 				return;
 			}
 
-			// Clear the list first
+			const currentSearch = searchInput ? searchInput.value.trim() : "";
+			if (currentSearch) {
+				filterCachedPages(currentSearch);
+				return;
+			}
+
+			const currentUrls = new Set(allCachedPages.map((p) => p.url));
+			const newUrls = skipAnimation
+				? new Set()
+				: new Set(
+						[...currentUrls].filter((url) => !previousCachedUrls.has(url))
+				  );
+
+			const existingElements = new Map();
+			cachedPagesList.querySelectorAll(".cached-page").forEach((el) => {
+				const url = el.querySelector(".view-button")?.dataset.url;
+				if (url && currentUrls.has(url)) {
+					existingElements.set(url, el);
+				}
+			});
+
 			cachedPagesList.innerHTML = "";
 
-			// Create each cached page element
-			cachedPages.forEach((page, index) => {
-				const pageElement = document.createElement("div");
-				pageElement.className = "cached-page";
-				pageElement.innerHTML = `
-          <div class="page-info">
-            <div class="page-title">${escapeHtml(page.title)}</div>
-            <div class="page-url">${escapeHtml(page.url)}</div>
-          </div>
-          <button class="view-button" data-url="${escapeHtml(
-						page.url
-					)}">View</button>
-          <button class="delete-button" data-url="${escapeHtml(
-						page.url
-					)}">Delete</button>
-        `;
+			allCachedPages.forEach((page, index) => {
+				let pageElement = existingElements.get(page.url);
+				const isNew = newUrls.has(page.url);
 
-				// Add event listeners
-				const viewButton = pageElement.querySelector(".view-button");
-				const deleteButton = pageElement.querySelector(".delete-button");
+				if (!pageElement) {
+					pageElement = document.createElement("div");
+					pageElement.className = "cached-page";
+					const icon = getPageIcon(page.url);
+					pageElement.innerHTML = `
+						<div class="page-icon">${icon}</div>
+						<div class="page-info">
+							<div class="page-title">${escapeHtml(page.title)}</div>
+							<div class="page-url">${escapeHtml(page.url)}</div>
+						</div>
+						<div class="page-actions">
+							<button class="view-button" data-url="${escapeHtml(page.url)}">View</button>
+							<button class="delete-button" data-url="${escapeHtml(page.url)}">Delete</button>
+						</div>
+					`;
 
-				viewButton.addEventListener("click", () => viewCachedPage(page.url));
-				deleteButton.addEventListener("click", () =>
-					deleteCachedPage(page.url)
-				);
+					const viewButton = pageElement.querySelector(".view-button");
+					const deleteButton = pageElement.querySelector(".delete-button");
+
+					viewButton.addEventListener("click", () => viewCachedPage(page.url));
+					deleteButton.addEventListener("click", () =>
+						deleteCachedPage(page.url)
+					);
+
+					if (isNew) {
+						pageElement.classList.add("fade-in");
+					}
+				}
 
 				cachedPagesList.appendChild(pageElement);
 			});
+
+			previousCachedUrls = currentUrls;
 		} catch (error) {
 			console.error("Error loading cached pages:", error);
 		}
 	}
 
-	// Functions for button clicks
+	function getPageIcon(url) {
+		try {
+			const urlObj = new URL(url);
+			const domain = urlObj.hostname.toLowerCase();
+
+			// Map common domains to emojis
+			if (domain.includes("github")) return "🐙";
+			if (domain.includes("youtube")) return "▶️";
+			if (domain.includes("twitter") || domain.includes("x.com")) return "🐦";
+			if (domain.includes("reddit")) return "🤖";
+			if (domain.includes("wikipedia")) return "📚";
+			if (domain.includes("linkedin")) return "💼";
+			if (domain.includes("stackoverflow")) return "💬";
+			if (domain.includes("medium")) return "📝";
+			if (
+				domain.includes("news") ||
+				domain.includes("bbc") ||
+				domain.includes("cnn")
+			)
+				return "📰";
+			if (domain.includes("amazon")) return "🛒";
+			if (domain.includes("google")) return "🔍";
+			if (domain.includes("facebook")) return "👥";
+			if (domain.includes("instagram")) return "📷";
+			if (domain.includes("docs.") || domain.includes("documentation"))
+				return "📖";
+
+			// Default icon
+			return "🌐";
+		} catch {
+			return "🌐";
+		}
+	}
+
 	async function viewCachedPage(url) {
 		try {
 			const cachedPages = await getCachedPages();
 			const page = cachedPages.find((p) => p.url === url);
 
 			if (page) {
-				// Open cached page in new tab
 				const newTab = await chrome.tabs.create({
 					url: `data:text/html;charset=utf-8,${encodeURIComponent(
 						page.content
@@ -542,10 +714,28 @@ document.addEventListener("DOMContentLoaded", function () {
 
 	async function deleteCachedPage(url) {
 		try {
+			const elements = cachedPagesList.querySelectorAll(".cached-page");
+			let elementToRemove = null;
+
+			elements.forEach((el) => {
+				const viewButton = el.querySelector(".view-button");
+				if (viewButton && viewButton.dataset.url === url) {
+					elementToRemove = el;
+				}
+			});
+
+			if (elementToRemove) {
+				elementToRemove.classList.add("fade-out");
+				await new Promise((resolve) => setTimeout(resolve, 300));
+			}
+
 			const cachedPages = await getCachedPages();
 			const filteredPages = cachedPages.filter((p) => p.url !== url);
 			await chrome.storage.local.set({ cachedPages: filteredPages });
-			loadCachedPages();
+
+			previousCachedUrls.delete(url);
+
+			loadCachedPages(true);
 		} catch (error) {
 			console.error("Error deleting cached page:", error);
 		}
@@ -557,21 +747,16 @@ document.addEventListener("DOMContentLoaded", function () {
 		return div.innerHTML;
 	}
 
-	// ===== SMART CACHING ALGORITHM FUNCTIONS =====
-
-	// Fetch ALL browser history (not just 10 items)
 	async function fetchAllBrowserHistory() {
 		try {
 			console.log("Fetching all browser history...");
 
-			// Get all history items (Chrome limits to 100,000 by default)
 			const historyItems = await chrome.history.search({
 				text: "",
-				maxResults: 100000, // Get as many as possible
-				startTime: 0, // From the beginning of time
+				maxResults: 1000,
+				startTime: 0,
 			});
 
-			// Filter out restricted URLs and clean up the data
 			const validHistory = historyItems
 				.filter((item) => item.url && !isRestrictedUrl(item.url))
 				.map((item) => ({
@@ -589,15 +774,12 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Fetch ALL open tabs (not just 10 items)
 	async function fetchAllOpenTabs() {
 		try {
 			console.log("Fetching all open tabs...");
 
-			// Get all tabs across all windows
 			const tabs = await chrome.tabs.query({});
 
-			// Filter out restricted URLs and clean up the data
 			const validTabs = tabs
 				.filter((tab) => tab.url && !isRestrictedUrl(tab.url))
 				.map((tab) => ({
@@ -616,7 +798,6 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Prepare data for Claude API
 	async function prepareDataForClaude() {
 		try {
 			console.log("Preparing data for Claude analysis...");
@@ -626,17 +807,20 @@ document.addEventListener("DOMContentLoaded", function () {
 				fetchAllOpenTabs(),
 			]);
 
+			const limitedHistory = historyData.slice(0, 500);
+			const limitedTabs = tabsData.slice(0, 50);
+
 			const dataForClaude = {
-				browser_history: historyData,
-				current_tabs: tabsData,
+				browser_history: limitedHistory,
+				current_tabs: limitedTabs,
 				timestamp: Date.now(),
-				total_history_items: historyData.length,
-				total_open_tabs: tabsData.length,
+				total_history_items: limitedHistory.length,
+				total_open_tabs: limitedTabs.length,
 			};
 
 			console.log("Data prepared for Claude:", {
-				historyItems: historyData.length,
-				openTabs: tabsData.length,
+				historyItems: limitedHistory.length,
+				openTabs: limitedTabs.length,
 			});
 
 			return dataForClaude;
@@ -646,33 +830,22 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Analyze browsing patterns with Claude
 	async function analyzeBrowsingPatterns() {
 		try {
-			// Show loading state (guard if analyzeButton no longer exists)
-			if (analyzeButton) {
-				analyzeButton.disabled = true;
-				analyzeButton.textContent = "🧠 Analyzing...";
-			}
-			categoriesList.innerHTML =
-				'<div class="loading-state">Analyzing your browsing patterns with Claude AI...</div>';
+			renderCategoriesSkeleton(3);
 
-			// Prepare data
 			const data = await prepareDataForClaude();
 			if (!data) {
 				throw new Error("Failed to prepare data for analysis");
 			}
 
-			// Send to background script for Claude analysis
 			const response = await chrome.runtime.sendMessage({
 				action: "analyzeWithClaude",
 				data: data,
 			});
 
 			if (response.success) {
-				// Display the categories
 				displayCategories(response.data);
-				// Return categories for chaining
 				return response.data;
 			} else {
 				throw new Error(response.error || "Analysis failed");
@@ -683,7 +856,6 @@ document.addEventListener("DOMContentLoaded", function () {
 			alert(`Analysis failed: ${error.message}`);
 			return [];
 		} finally {
-			// Reset button state
 			if (analyzeButton) {
 				analyzeButton.disabled = false;
 				analyzeButton.textContent = "🧠 Analyze Browsing Patterns";
@@ -691,7 +863,6 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Display categories returned by Claude
 	function displayCategories(categories) {
 		try {
 			if (!categories || categories.length === 0) {
@@ -756,10 +927,8 @@ document.addEventListener("DOMContentLoaded", function () {
 		}
 	}
 
-	// Load cached categories on startup
 	async function loadCachedCategories() {
 		try {
-			// Ensure config is loaded
 			if (!CONFIG) {
 				const configLoaded = await loadConfig();
 				if (!configLoaded || !CONFIG) {
@@ -773,10 +942,9 @@ document.addEventListener("DOMContentLoaded", function () {
 			]);
 
 			if (result.claudeCategories && result.claudeAnalysisTimestamp) {
-				// Check if analysis is less than configured hours old
 				const hoursSinceAnalysis =
 					(Date.now() - result.claudeAnalysisTimestamp) / (1000 * 60 * 60);
-				const cacheDurationHours = CONFIG ? CONFIG.CACHE_DURATION_HOURS : 24; // Use config or default
+				const cacheDurationHours = CONFIG ? CONFIG.CACHE_DURATION_HOURS : 24;
 
 				if (hoursSinceAnalysis < cacheDurationHours) {
 					displayCategories(result.claudeCategories);
@@ -792,6 +960,116 @@ document.addEventListener("DOMContentLoaded", function () {
 			}
 		} catch (error) {
 			console.error("Error loading cached categories:", error);
+		}
+	}
+
+	async function loadFlightDetectionStatus() {
+		try {
+			const result = await chrome.storage.local.get(["flightDetectionStatus"]);
+			if (result.flightDetectionStatus) {
+				updateFlightBanner(result.flightDetectionStatus);
+			}
+		} catch (error) {
+			console.error("Error loading flight detection status:", error);
+		}
+	}
+
+	function updateFlightBanner(status) {
+		if (!flightBanner) return;
+
+		if (!status) {
+			flightBanner.style.display = "none";
+			return;
+		}
+
+		// Auto-dismiss completed/failed banners after showing for a while
+		if (!status.active && status.completedAt) {
+			const elapsed = Date.now() - status.completedAt;
+			// Auto-dismiss after 30 seconds
+			if (elapsed > 30000) {
+				flightBanner.style.display = "none";
+				return;
+			}
+		}
+
+		let bannerClass = "flight-banner";
+		let icon = "✈️";
+		let title = "";
+		let text = "";
+		let showSpinner = false;
+		let showClose = false;
+
+		switch (status.stage) {
+			case "analyzing":
+				title = "Flight Detected!";
+				text = "Analyzing your browsing patterns...";
+				showSpinner = true;
+				break;
+			case "caching":
+				title = "Caching Flight Info";
+				text = status.queries
+					? `Fetching ${status.queries.length} related pages...`
+					: "Fetching related pages...";
+				showSpinner = true;
+				break;
+			case "fallback":
+				title = "Using Fallback";
+				text = "Caching essential flight pages...";
+				showSpinner = true;
+				break;
+			case "completed":
+				bannerClass += " completed";
+				icon = "✅";
+				title = "Flight Pages Cached!";
+				text = status.queries
+					? `${status.queries.length} pages ready for offline viewing`
+					: "Pages ready for offline viewing";
+				showClose = true;
+				break;
+			case "failed":
+				bannerClass += " failed";
+				icon = "⚠️";
+				title = "Caching Failed";
+				text = "Could not cache flight pages. Please try manually.";
+				showClose = true;
+				break;
+			default:
+				flightBanner.style.display = "none";
+				return;
+		}
+
+		// Truncate flight text if too long
+		const flightInfo = status.flightText
+			? status.flightText.substring(0, 50) +
+			  (status.flightText.length > 50 ? "..." : "")
+			: "";
+
+		flightBanner.className = bannerClass;
+		flightBanner.style.display = "flex";
+		flightBanner.innerHTML = `
+			<span class="flight-banner-icon">${icon}</span>
+			<div class="flight-banner-content">
+				<div class="flight-banner-title">${escapeHtml(title)}</div>
+				<div class="flight-banner-text">${escapeHtml(text)}</div>
+			</div>
+			${showSpinner ? '<div class="flight-banner-spinner"></div>' : ""}
+			${
+				showClose
+					? '<button class="flight-banner-close" id="closeBanner">×</button>'
+					: ""
+			}
+		`;
+
+		// Add close button handler
+		if (showClose) {
+			const closeBtn = document.getElementById("closeBanner");
+			if (closeBtn) {
+				closeBtn.addEventListener("click", () => {
+					flightBanner.style.display = "none";
+					// Clear the status
+					chrome.storage.local.remove(["flightDetectionStatus"]);
+				});
+			}
 		}
 	}
 });
